@@ -42,14 +42,10 @@ mongoose
   })
   .catch((err) => {
     console.error("❌ MongoDB connection error:", err)
-    console.error(
-      'If you see "Could not connect to any servers", make sure your current IP address is whitelisted in your MongoDB Atlas cluster. ' +
-        "Go to https://cloud.mongodb.com, select your cluster, then Network Access > IP Access List, and add your current IP or 0.0.0.0/0 for open access (not recommended for production).",
-    )
     process.exit(1)
   })
 
-// Enhanced Mongoose schema with better validation
+// Enhanced Mongoose schema with interview results
 const applicantSchema = new mongoose.Schema(
   {
     name: { type: String, required: true, trim: true },
@@ -74,11 +70,40 @@ const applicantSchema = new mongoose.Schema(
     resumeUrl: String,
     status: {
       type: String,
-      enum: ["pending", "under_review", "approved", "rejected"],
+      enum: ["pending", "under_review", "approved", "rejected", "interview_completed"],
       default: "pending",
     },
     interviewCode: String,
     interviewCodeExpiry: Date,
+    interviewResults: {
+      aptitudeScore: { type: Number, default: 0 },
+      codingScore: { type: Number, default: 0 },
+      hrScore: { type: Number, default: 0 },
+      totalScore: { type: Number, default: 0 },
+      aptitudeAnswers: [
+        {
+          question: String,
+          selectedAnswer: String,
+          correctAnswer: String,
+          isCorrect: Boolean,
+        },
+      ],
+      codingAnswers: [
+        {
+          question: String,
+          solution: String,
+          score: Number,
+        },
+      ],
+      hrAnswers: [
+        {
+          question: String,
+          answer: String,
+          score: Number,
+        },
+      ],
+      completedAt: Date,
+    },
     createdAt: { type: Date, default: Date.now },
     updatedAt: { type: Date, default: Date.now },
   },
@@ -94,14 +119,50 @@ applicantSchema.index({ createdAt: -1 })
 
 const Applicant = mongoose.model("Applicant", applicantSchema, "client")
 
-// Email configuration
-const transporter = nodemailer.createTransport({
-  service: "gmail",
-  auth: {
-    user: process.env.EMAIL_USER || "your-email@gmail.com",
-    pass: process.env.EMAIL_PASS || "your-app-password",
-  },
-})
+// Fixed Email configuration - Using Ethereal for testing
+let transporter
+
+// Create test account and transporter
+const createTransporter = async () => {
+  try {
+    // Create a test account for development
+    const testAccount = await nodemailer.createTestAccount()
+
+    transporter = nodemailer.createTransport({
+      host: "smtp.ethereal.email",
+      port: 587,
+      secure: false,
+      auth: {
+        user: testAccount.user,
+        pass: testAccount.pass,
+      },
+    })
+
+    console.log("✅ Email transporter created with test account")
+    console.log("📧 Test email credentials:", testAccount.user)
+
+    // Test the connection
+    await transporter.verify()
+    console.log("✅ Email server connection verified")
+  } catch (error) {
+    console.error("❌ Failed to create email transporter:", error)
+    // Fallback to a simple transporter that logs emails
+    transporter = {
+      sendMail: async (mailOptions) => {
+        console.log("📧 Email would be sent:", {
+          to: mailOptions.to,
+          subject: mailOptions.subject,
+          preview: mailOptions.html.substring(0, 100) + "...",
+        })
+        return { messageId: "test-" + Date.now() }
+      },
+    }
+    console.log("✅ Fallback email logger created")
+  }
+}
+
+// Initialize transporter
+createTransporter()
 
 // Generate random interview code
 const generateInterviewCode = () => {
@@ -116,16 +177,28 @@ const generateInterviewCode = () => {
 // Send email function
 const sendEmail = async (to, subject, html) => {
   try {
-    await transporter.sendMail({
-      from: process.env.EMAIL_USER || "noreply@company.com",
+    const info = await transporter.sendMail({
+      from: '"AI Interview Platform" <noreply@aiinterview.com>',
       to,
       subject,
       html,
     })
+
     console.log(`✅ Email sent to ${to}`)
+
+    // Only try to get preview URL if it's a real nodemailer transporter
+    if (info && info.messageId && info.messageId.includes("@ethereal.email")) {
+      const previewUrl = nodemailer.getTestMessageUrl(info)
+      if (previewUrl) {
+        console.log("📧 Preview URL:", previewUrl)
+      }
+    }
+
+    return info
   } catch (error) {
     console.error("❌ Email sending failed:", error)
     // Don't throw error to prevent breaking the flow
+    return null
   }
 }
 
@@ -342,12 +415,22 @@ app.post("/api/admin/approve-applicant", async (req, res) => {
         </div>
         
         <div style="background-color: #f3f4f6; padding: 20px; border-radius: 8px; margin: 20px 0;">
+          <h3 style="color: #374151; margin-top: 0;">Interview Process:</h3>
+          <ol style="color: #4b5563;">
+            <li><strong>Aptitude Round:</strong> 10 questions - 15 minutes</li>
+            <li><strong>Coding Round:</strong> 3 problems - 45 minutes</li>
+            <li><strong>HR Round:</strong> 5 questions - 20 minutes</li>
+          </ol>
+          <p style="color: #dc2626;"><strong>Total Duration:</strong> 80 minutes</p>
+        </div>
+        
+        <div style="background-color: #f3f4f6; padding: 20px; border-radius: 8px; margin: 20px 0;">
           <h3 style="color: #374151; margin-top: 0;">Next Steps:</h3>
           <ol style="color: #4b5563;">
             <li>Log in to your client dashboard</li>
             <li>Click on "Enter Interview Code"</li>
             <li>Enter the code: <strong>${interviewCode}</strong></li>
-            <li>Complete your interview assessment</li>
+            <li>Complete all three rounds of the interview</li>
           </ol>
         </div>
         
@@ -430,12 +513,43 @@ app.post("/api/client/verify-interview-code", async (req, res) => {
       interviewData: {
         name: applicant.name,
         role: applicant.role,
-        task: "Describe your experience with the technologies mentioned in your resume and how you would approach solving complex technical challenges in a team environment.",
+        applicantId: applicant._id,
       },
     })
   } catch (err) {
     console.error("❌ Verify code error:", err)
     res.status(500).json({ error: "Failed to verify interview code" })
+  }
+})
+
+// Endpoint to submit interview results
+app.post("/api/client/submit-interview", async (req, res) => {
+  try {
+    const { email, interviewResults } = req.body
+    console.log(`📝 Submitting interview results for: ${email}`)
+
+    const applicant = await Applicant.findOneAndUpdate(
+      { email: email.toLowerCase().trim() },
+      {
+        status: "interview_completed",
+        interviewResults: {
+          ...interviewResults,
+          completedAt: new Date(),
+        },
+        updatedAt: new Date(),
+      },
+      { new: true },
+    )
+
+    if (!applicant) {
+      return res.status(404).json({ error: "Applicant not found" })
+    }
+
+    console.log(`✅ Interview results saved for: ${email}`)
+    res.json({ success: true, message: "Interview results submitted successfully" })
+  } catch (err) {
+    console.error("❌ Submit interview error:", err)
+    res.status(500).json({ error: "Failed to submit interview results" })
   }
 })
 

@@ -56,6 +56,12 @@ function AdminDashboard({ onLogout }) {
           education: "Ph.D. Data Science",
           skills: ["Python", "Machine Learning", "SQL"],
           createdAt: new Date().toISOString(),
+          interviewResults: {
+            totalScore: 85,
+            aptitudeScore: 90,
+            codingScore: 80,
+            hrScore: 85,
+          },
         },
       ])
     } finally {
@@ -116,6 +122,8 @@ function AdminDashboard({ onLogout }) {
         return "bg-red-100 text-red-800 border-red-200"
       case "under_review":
         return "bg-blue-100 text-blue-800 border-blue-200"
+      case "interview_completed":
+        return "bg-purple-100 text-purple-800 border-purple-200"
       default:
         return "bg-amber-100 text-amber-800 border-amber-200"
     }
@@ -129,6 +137,8 @@ function AdminDashboard({ onLogout }) {
         return "Rejected"
       case "under_review":
         return "Under Review"
+      case "interview_completed":
+        return "Interview Completed"
       default:
         return "Pending"
     }
@@ -284,6 +294,26 @@ function AdminDashboard({ onLogout }) {
               </div>
             </div>
           </div>
+
+          <div className="bg-white/90 backdrop-blur-xl rounded-xl p-6 shadow-lg border border-white/50">
+            <div className="flex items-center">
+              <div className="w-12 h-12 bg-purple-100 rounded-lg flex items-center justify-center">
+                <svg className="w-6 h-6 text-purple-600" fill="currentColor" viewBox="0 0 20 20">
+                  <path
+                    fillRule="evenodd"
+                    d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z"
+                    clipRule="evenodd"
+                  />
+                </svg>
+              </div>
+              <div className="ml-4">
+                <p className="text-sm font-medium text-gray-600">Interviews Completed</p>
+                <p className="text-2xl font-bold text-gray-900">
+                  {applicants.filter((app) => app.status === "interview_completed").length}
+                </p>
+              </div>
+            </div>
+          </div>
         </div>
 
         {/* Applicants Table */}
@@ -301,6 +331,7 @@ function AdminDashboard({ onLogout }) {
                   <th className="py-4 px-6 text-left text-sm font-semibold text-gray-700">Contact</th>
                   <th className="py-4 px-6 text-left text-sm font-semibold text-gray-700">Role & Skills</th>
                   <th className="py-4 px-6 text-left text-sm font-semibold text-gray-700">Status</th>
+                  <th className="py-4 px-6 text-left text-sm font-semibold text-gray-700">Interview Results</th>
                   <th className="py-4 px-6 text-left text-sm font-semibold text-gray-700">Actions</th>
                 </tr>
               </thead>
@@ -344,6 +375,22 @@ function AdminDashboard({ onLogout }) {
                       >
                         {getStatusText(applicant.status)}
                       </span>
+                    </td>
+                    <td className="py-4 px-6">
+                      {applicant.status === "interview_completed" && applicant.interviewResults ? (
+                        <div className="space-y-1">
+                          <div className="text-sm font-medium text-gray-900">
+                            Total: {applicant.interviewResults.totalScore}%
+                          </div>
+                          <div className="text-xs text-gray-500 space-y-0.5">
+                            <div>Aptitude: {applicant.interviewResults.aptitudeScore}%</div>
+                            <div>Coding: {applicant.interviewResults.codingScore}%</div>
+                            <div>HR: {applicant.interviewResults.hrScore}%</div>
+                          </div>
+                        </div>
+                      ) : (
+                        <span className="text-sm text-gray-400">Not available</span>
+                      )}
                     </td>
                     <td className="py-4 px-6">
                       {applicant.status === "pending" || applicant.status === "under_review" ? (

@@ -19,7 +19,7 @@ function InterviewCodeEntry({ user, onCodeVerified, onBack }) {
     setError("")
 
     try {
-      const response = await axios.post("/api/client/verify-interview-code", {
+      const response = await axios.post("http://localhost:5000/api/client/verify-interview-code", {
         email: user.email,
         code: code.trim(),
       })
@@ -111,7 +111,7 @@ function InterviewCodeEntry({ user, onCodeVerified, onBack }) {
             </div>
           </form>
 
-          {/* Help Section */}
+          {/* Interview Process Info */}
           <div className="mt-8 p-4 bg-blue-50 border border-blue-200 rounded-xl">
             <div className="flex items-start space-x-3">
               <svg className="w-5 h-5 text-blue-600 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
@@ -122,8 +122,36 @@ function InterviewCodeEntry({ user, onCodeVerified, onBack }) {
                 />
               </svg>
               <div>
-                <h4 className="text-blue-800 font-semibold text-sm mb-1">Can't find your code?</h4>
-                <p className="text-blue-700 text-xs">
+                <h4 className="text-blue-800 font-semibold text-sm mb-1">Interview Process</h4>
+                <div className="text-blue-700 text-xs space-y-1">
+                  <p>
+                    • <strong>Aptitude Round:</strong> 10 questions - 15 minutes
+                  </p>
+                  <p>
+                    • <strong>Coding Round:</strong> 3 problems - 45 minutes
+                  </p>
+                  <p>
+                    • <strong>HR Round:</strong> 5 questions - 20 minutes
+                  </p>
+                  <p className="font-semibold">Total Duration: 80 minutes</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Help Section */}
+          <div className="mt-6 p-4 bg-amber-50 border border-amber-200 rounded-xl">
+            <div className="flex items-start space-x-3">
+              <svg className="w-5 h-5 text-amber-600 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
+                <path
+                  fillRule="evenodd"
+                  d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z"
+                  clipRule="evenodd"
+                />
+              </svg>
+              <div>
+                <h4 className="text-amber-800 font-semibold text-sm mb-1">Can't find your code?</h4>
+                <p className="text-amber-700 text-xs">
                   Check your email inbox and spam folder. The code was sent to{" "}
                   <span className="font-medium">{user?.email}</span>. If you still can't find it, contact support.
                 </p>

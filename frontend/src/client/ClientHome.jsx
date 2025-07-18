@@ -5,6 +5,8 @@ import { googleLogout, useGoogleLogin } from "@react-oauth/google"
 import axios from "axios"
 import ClientDashboard from "./ClientDashboard"
 import InterviewCodeEntry from "./InterviewCodeEntry"
+import InterviewPlatform from "./InterviewPlatform"
+import InterviewComplete from "./InterviewComplete"
 
 // Debounce utility to limit API calls
 const debounce = (func, wait) => {
@@ -37,6 +39,7 @@ function ClientHome({ onBack, task }) {
   const [interviewData, setInterviewData] = useState(null)
   const [initialLoading, setInitialLoading] = useState(true)
   const mockTask = "Describe your experience with AI interviews and how you handle technical challenges."
+  const [interviewResults, setInterviewResults] = useState(null)
 
   // Gemini API key
   const GEMINI_API_KEY = "AIzaSyBe2gAXouTuPzR0HuqY6cSLL40OWjblklw"
@@ -388,6 +391,24 @@ function ClientHome({ onBack, task }) {
 
   if (stage === "codeEntry") {
     return <InterviewCodeEntry user={user} onCodeVerified={handleCodeVerified} onBack={() => setStage("dashboard")} />
+  }
+
+  if (stage === "interview") {
+    return (
+      <InterviewPlatform
+        user={user}
+        interviewData={interviewData}
+        onComplete={(results) => {
+          setInterviewResults(results)
+          setStage("interviewComplete")
+        }}
+        onBack={() => setStage("dashboard")}
+      />
+    )
+  }
+
+  if (stage === "interviewComplete") {
+    return <InterviewComplete user={user} results={interviewResults} onBackToDashboard={() => setStage("dashboard")} />
   }
 
   return (
