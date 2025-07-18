@@ -3,6 +3,8 @@ const mongoose = require("mongoose")
 const multer = require("multer")
 const cors = require("cors")
 const nodemailer = require("nodemailer")
+const bcrypt = require("bcryptjs")
+const jwt = require("jsonwebtoken")
 const path = require("path")
 const fs = require("fs")
 require("dotenv").config()
@@ -45,14 +47,36 @@ mongoose
     process.exit(1)
   })
 
-// Enhanced Mongoose schema with interview results
-const applicantSchema = new mongoose.Schema(
+// User schema for authentication
+const userSchema = new mongoose.Schema(
   {
     name: { type: String, required: true, trim: true },
     email: {
       type: String,
       required: true,
       unique: true,
+      lowercase: true,
+      trim: true,
+      match: [/^\w+([.-]?\w+)*@\w+([.-]?\w+)*(\.\w{2,3})+$/, "Please enter a valid email"],
+    },
+    password: { type: String, required: true, minlength: 6 },
+    hasApplication: { type: Boolean, default: false },
+  },
+  {
+    timestamps: true,
+  },
+)
+
+const User = mongoose.model("User", userSchema)
+
+// Enhanced Mongoose schema with interview results
+const applicantSchema = new mongoose.Schema(
+  {
+    userId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
+    name: { type: String, required: true, trim: true },
+    email: {
+      type: String,
+      required: true,
       lowercase: true,
       trim: true,
       match: [/^\w+([.-]?\w+)*@\w+([.-]?\w+)*(\.\w{2,3})+$/, "Please enter a valid email"],
@@ -68,6 +92,7 @@ const applicantSchema = new mongoose.Schema(
     role: { type: String, trim: true },
     skills: [{ type: String, trim: true }],
     resumeUrl: String,
+    resumeFileName: String,
     status: {
       type: String,
       enum: ["pending", "under_review", "approved", "rejected", "interview_completed"],
@@ -118,6 +143,9 @@ applicantSchema.index({ status: 1 })
 applicantSchema.index({ createdAt: -1 })
 
 const Applicant = mongoose.model("Applicant", applicantSchema, "client")
+
+// JWT Secret
+const JWT_SECRET = process.env.JWT_SECRET || "your-secret-key-here"
 
 // Fixed Email configuration - Using Ethereal for testing
 let transporter
@@ -242,23 +270,93 @@ app.get("/api/health", (req, res) => {
   })
 })
 
-// Endpoint to check if resume already uploaded
-app.get("/api/client/check-resume", async (req, res) => {
+// Client signup endpoint
+app.post("/api/client/signup", async (req, res) => {
   try {
-    const { email } = req.query
-    console.log(`🔍 Checking resume for email: ${email}`)
+    const { name, email, password } = req.body
+    console.log(`📝 User signup attempt: ${email}`)
 
-    if (!email) {
-      return res.status(400).json({ exists: false, error: "Email is required" })
+    // Check if user already exists
+    const existingUser = await User.findOne({ email: email.toLowerCase().trim() })
+    if (existingUser) {
+      return res.status(400).json({ error: "User already exists with this email" })
     }
 
-    const exists = await Applicant.exists({ email: email.toLowerCase().trim() })
-    console.log(`📋 Resume exists for ${email}: ${!!exists}`)
+    // Hash password
+    const hashedPassword = await bcrypt.hash(password, 10)
 
-    res.json({ exists: !!exists })
+    // Create user
+    const user = new User({
+      name: name.trim(),
+      email: email.toLowerCase().trim(),
+      password: hashedPassword,
+    })
+
+    await user.save()
+    console.log(`✅ User created: ${email}`)
+
+    res.json({ success: true, message: "Account created successfully" })
   } catch (err) {
-    console.error("❌ Check resume error:", err)
-    res.status(500).json({ error: "Server error" })
+    console.error("❌ Signup error:", err)
+    res.status(500).json({ error: "Failed to create account" })
+  }
+})
+
+// Client login endpoint
+app.post("/api/client/login", async (req, res) => {
+  try {
+    const { email, password } = req.body
+    console.log(`🔐 Login attempt: ${email}`)
+
+    // Find user
+    const user = await User.findOne({ email: email.toLowerCase().trim() })
+    if (!user) {
+      return res.status(400).json({ error: "Invalid email or password" })
+    }
+
+    // Check password
+    const isValidPassword = await bcrypt.compare(password, user.password)
+    if (!isValidPassword) {
+      return res.status(400).json({ error: "Invalid email or password" })
+    }
+
+    // Check if user has application
+    const application = await Applicant.findOne({ email: email.toLowerCase().trim() })
+    const hasApplication = !!application
+
+    // Update user's hasApplication status
+    await User.findByIdAndUpdate(user._id, { hasApplication })
+
+    // Generate JWT token
+    const token = jwt.sign({ userId: user._id, email: user.email }, JWT_SECRET, { expiresIn: "7d" })
+
+    console.log(`✅ Login successful: ${email}`)
+
+    res.json({
+      success: true,
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        hasApplication,
+        ...(application && {
+          phone: application.phone,
+          institution: application.institution,
+          address: application.address,
+          experience: application.experience,
+          education: application.education,
+          linkedin: application.linkedin,
+          portfolio: application.portfolio,
+          github: application.github,
+          role: application.role,
+          skills: application.skills,
+        }),
+      },
+      token,
+    })
+  } catch (err) {
+    console.error("❌ Login error:", err)
+    res.status(500).json({ error: "Login failed" })
   }
 })
 
@@ -306,6 +404,12 @@ app.post("/api/client/apply", upload.single("resume"), async (req, res) => {
       return res.status(400).json({ error: "Application already submitted for this email." })
     }
 
+    // Find user
+    const user = await User.findOne({ email: email.toLowerCase().trim() })
+    if (!user) {
+      return res.status(400).json({ error: "User not found. Please sign up first." })
+    }
+
     const { name, phone, institution, address, experience, education, linkedin, portfolio, github, role, skills } =
       req.body
 
@@ -317,6 +421,7 @@ app.post("/api/client/apply", upload.single("resume"), async (req, res) => {
     const resumeUrl = `/uploads/${req.file.filename}`
 
     const applicant = new Applicant({
+      userId: user._id,
       name: name.trim(),
       email: email.toLowerCase().trim(),
       phone: phone.trim(),
@@ -330,11 +435,15 @@ app.post("/api/client/apply", upload.single("resume"), async (req, res) => {
       role: role?.trim() || "",
       skills: skills ? JSON.parse(skills) : [],
       resumeUrl,
+      resumeFileName: req.file.originalname,
       status: "pending",
     })
 
     await applicant.save()
     console.log(`✅ Application saved for: ${email}`)
+
+    // Update user's hasApplication status
+    await User.findByIdAndUpdate(user._id, { hasApplication: true })
 
     // Send confirmation email to applicant
     const confirmationHtml = `
@@ -368,16 +477,70 @@ app.post("/api/client/apply", upload.single("resume"), async (req, res) => {
   }
 })
 
-// Admin endpoint to get all applicants
+// Endpoint to update client profile
+app.put("/api/client/update-profile", async (req, res) => {
+  try {
+    const { email, ...updateData } = req.body
+    console.log(`📝 Updating profile for: ${email}`)
+
+    const applicant = await Applicant.findOneAndUpdate(
+      { email: email.toLowerCase().trim() },
+      {
+        ...updateData,
+        updatedAt: new Date(),
+      },
+      { new: true },
+    )
+
+    if (!applicant) {
+      return res.status(404).json({ error: "Application not found" })
+    }
+
+    console.log(`✅ Profile updated for: ${email}`)
+    res.json({ success: true, message: "Profile updated successfully", applicant })
+  } catch (err) {
+    console.error("❌ Update profile error:", err)
+    res.status(500).json({ error: "Failed to update profile" })
+  }
+})
+
+// Admin endpoint to get all applicants with enhanced data
 app.get("/api/admin/applicants", async (req, res) => {
   try {
     console.log("🔍 Fetching all applicants")
-    const applicants = await Applicant.find({}).sort({ createdAt: -1 })
+    const applicants = await Applicant.find({}).populate("userId", "name email").sort({ createdAt: -1 })
     console.log(`📋 Found ${applicants.length} applicants`)
     res.json(applicants)
   } catch (err) {
     console.error("❌ Get applicants error:", err)
     res.status(500).json({ error: "Failed to fetch applicants" })
+  }
+})
+
+// Admin endpoint to view resume
+app.get("/api/admin/resume/:applicantId", async (req, res) => {
+  try {
+    const { applicantId } = req.params
+    console.log(`📄 Fetching resume for applicant: ${applicantId}`)
+
+    const applicant = await Applicant.findById(applicantId)
+    if (!applicant || !applicant.resumeUrl) {
+      return res.status(404).json({ error: "Resume not found" })
+    }
+
+    const resumePath = path.join(__dirname, applicant.resumeUrl)
+    if (!fs.existsSync(resumePath)) {
+      return res.status(404).json({ error: "Resume file not found on server" })
+    }
+
+    res.json({
+      resumeUrl: applicant.resumeUrl,
+      fileName: applicant.resumeFileName,
+      downloadUrl: `http://localhost:5000${applicant.resumeUrl}`,
+    })
+  } catch (err) {
+    console.error("❌ Get resume error:", err)
+    res.status(500).json({ error: "Failed to fetch resume" })
   }
 })
 

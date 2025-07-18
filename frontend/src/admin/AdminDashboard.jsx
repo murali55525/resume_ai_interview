@@ -8,62 +8,19 @@ function AdminDashboard({ onLogout }) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
   const [processingId, setProcessingId] = useState(null)
+  const [selectedApplicant, setSelectedApplicant] = useState(null)
+  const [showResumeModal, setShowResumeModal] = useState(false)
 
   // Fetch applicants data
   const fetchApplicants = async () => {
     try {
       setLoading(true)
-      const response = await axios.get("/api/admin/applicants")
+      const response = await axios.get("http://localhost:5000/api/admin/applicants")
       setApplicants(response.data)
       setError("")
     } catch (err) {
       setError("Failed to fetch applicants data")
       console.error("Fetch error:", err)
-      // Demo data fallback
-      setApplicants([
-        {
-          _id: "1",
-          name: "Alice Smith",
-          email: "alice@example.com",
-          role: "Frontend Developer",
-          status: "pending",
-          phone: "+1 (555) 123-4567",
-          institution: "MIT",
-          education: "B.S. Computer Science",
-          skills: ["React", "JavaScript", "CSS"],
-          createdAt: new Date().toISOString(),
-        },
-        {
-          _id: "2",
-          name: "Bob Lee",
-          email: "bob@example.com",
-          role: "Backend Engineer",
-          status: "under_review",
-          phone: "+1 (555) 234-5678",
-          institution: "Stanford University",
-          education: "M.S. Software Engineering",
-          skills: ["Node.js", "Python", "MongoDB"],
-          createdAt: new Date().toISOString(),
-        },
-        {
-          _id: "3",
-          name: "Carol Jones",
-          email: "carol@example.com",
-          role: "Data Scientist",
-          status: "approved",
-          phone: "+1 (555) 345-6789",
-          institution: "UC Berkeley",
-          education: "Ph.D. Data Science",
-          skills: ["Python", "Machine Learning", "SQL"],
-          createdAt: new Date().toISOString(),
-          interviewResults: {
-            totalScore: 85,
-            aptitudeScore: 90,
-            codingScore: 80,
-            hrScore: 85,
-          },
-        },
-      ])
     } finally {
       setLoading(false)
     }
@@ -73,10 +30,24 @@ function AdminDashboard({ onLogout }) {
     fetchApplicants()
   }, [])
 
+  const handleViewResume = async (applicant) => {
+    try {
+      const response = await axios.get(`http://localhost:5000/api/admin/resume/${applicant._id}`)
+      setSelectedApplicant({
+        ...applicant,
+        resumeData: response.data,
+      })
+      setShowResumeModal(true)
+    } catch (err) {
+      console.error("Resume fetch error:", err)
+      alert("Failed to fetch resume")
+    }
+  }
+
   const handleApprove = async (applicantId, applicantEmail, applicantName) => {
     setProcessingId(applicantId)
     try {
-      await axios.post("/api/admin/approve-applicant", {
+      await axios.post("http://localhost:5000/api/admin/approve-applicant", {
         applicantId,
         email: applicantEmail,
         name: applicantName,
@@ -97,7 +68,7 @@ function AdminDashboard({ onLogout }) {
   const handleReject = async (applicantId, applicantEmail) => {
     setProcessingId(applicantId)
     try {
-      await axios.post("/api/admin/reject-applicant", {
+      await axios.post("http://localhost:5000/api/admin/reject-applicant", {
         applicantId,
         email: applicantEmail,
       })
@@ -159,50 +130,6 @@ function AdminDashboard({ onLogout }) {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 via-blue-50 to-indigo-50">
-      <header className="bg-white/90 backdrop-blur-xl shadow-lg border-b border-white/50">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-4">
-              <div className="w-10 h-10 bg-gradient-to-r from-blue-600 to-indigo-600 rounded-xl flex items-center justify-center">
-                <svg className="w-6 h-6 text-white" fill="currentColor" viewBox="0 0 20 20">
-                  <path
-                    fillRule="evenodd"
-                    d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-6-3a2 2 0 11-4 0 2 2 0 014 0zm-2 4a5 5 0 00-4.546 2.916A5.986 5.986 0 0010 16a5.986 5.986 0 004.546-2.084A5 5 0 0010 11z"
-                    clipRule="evenodd"
-                  />
-                </svg>
-              </div>
-              <div>
-                <h1 className="text-2xl font-bold text-gray-800">Admin Dashboard</h1>
-                <p className="text-gray-600">Manage candidate applications</p>
-              </div>
-            </div>
-            <div className="flex items-center space-x-4">
-              <button
-                onClick={fetchApplicants}
-                className="flex items-center space-x-2 px-4 py-2 bg-blue-100 hover:bg-blue-200 text-blue-700 rounded-lg font-medium transition-colors duration-300"
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-                  />
-                </svg>
-                <span>Refresh</span>
-              </button>
-              <button
-                onClick={onLogout}
-                className="bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white px-5 py-2 rounded-lg font-semibold shadow-lg hover:shadow-xl transition-all duration-300"
-              >
-                Logout
-              </button>
-            </div>
-          </div>
-        </div>
-      </header>
-
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {error && (
           <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl text-red-600">
@@ -220,7 +147,7 @@ function AdminDashboard({ onLogout }) {
         )}
 
         {/* Statistics Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+        <div className="grid grid-cols-1 md:grid-cols-5 gap-6 mb-8">
           <div className="bg-white/90 backdrop-blur-xl rounded-xl p-6 shadow-lg border border-white/50">
             <div className="flex items-center">
               <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
@@ -319,8 +246,26 @@ function AdminDashboard({ onLogout }) {
         {/* Applicants Table */}
         <div className="bg-white/90 backdrop-blur-xl rounded-2xl shadow-xl border border-white/50 overflow-hidden">
           <div className="px-6 py-4 border-b border-gray-200">
-            <h2 className="text-xl font-bold text-gray-800">Candidate Applications</h2>
-            <p className="text-gray-600">Review and manage candidate applications</p>
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-xl font-bold text-gray-800">Candidate Applications</h2>
+                <p className="text-gray-600">Review and manage candidate applications</p>
+              </div>
+              <button
+                onClick={fetchApplicants}
+                className="flex items-center space-x-2 px-4 py-2 bg-blue-100 hover:bg-blue-200 text-blue-700 rounded-lg font-medium transition-colors duration-300"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                  />
+                </svg>
+                <span>Refresh</span>
+              </button>
+            </div>
           </div>
 
           <div className="overflow-x-auto">
@@ -328,10 +273,11 @@ function AdminDashboard({ onLogout }) {
               <thead>
                 <tr className="bg-gradient-to-r from-blue-50 to-indigo-50 border-b border-gray-200">
                   <th className="py-4 px-6 text-left text-sm font-semibold text-gray-700">Candidate</th>
-                  <th className="py-4 px-6 text-left text-sm font-semibold text-gray-700">Contact</th>
+                  <th className="py-4 px-6 text-left text-sm font-semibold text-gray-700">Contact & Education</th>
                   <th className="py-4 px-6 text-left text-sm font-semibold text-gray-700">Role & Skills</th>
                   <th className="py-4 px-6 text-left text-sm font-semibold text-gray-700">Status</th>
                   <th className="py-4 px-6 text-left text-sm font-semibold text-gray-700">Interview Results</th>
+                  <th className="py-4 px-6 text-left text-sm font-semibold text-gray-700">Resume</th>
                   <th className="py-4 px-6 text-left text-sm font-semibold text-gray-700">Actions</th>
                 </tr>
               </thead>
@@ -341,16 +287,22 @@ function AdminDashboard({ onLogout }) {
                     <td className="py-4 px-6">
                       <div>
                         <div className="text-sm font-medium text-gray-900">{applicant.name}</div>
-                        <div className="text-sm text-gray-500">{applicant.institution}</div>
-                        <div className="text-xs text-gray-400">{applicant.education}</div>
+                        <div className="text-sm text-gray-500">{applicant.email}</div>
+                        <div className="text-xs text-gray-400">
+                          Applied: {new Date(applicant.createdAt).toLocaleDateString()}
+                        </div>
                       </div>
                     </td>
                     <td className="py-4 px-6">
-                      <div className="text-sm text-gray-900">{applicant.email}</div>
-                      <div className="text-sm text-gray-500">{applicant.phone}</div>
+                      <div className="text-sm text-gray-900">{applicant.phone}</div>
+                      <div className="text-sm text-gray-500">{applicant.institution}</div>
+                      <div className="text-xs text-gray-400">{applicant.education}</div>
+                      {applicant.address && <div className="text-xs text-gray-400">{applicant.address}</div>}
                     </td>
                     <td className="py-4 px-6">
-                      <div className="text-sm font-medium text-blue-600 mb-2">{applicant.role}</div>
+                      <div className="text-sm font-medium text-blue-600 mb-2">
+                        {applicant.role || "General Position"}
+                      </div>
                       <div className="flex flex-wrap gap-1">
                         {applicant.skills?.slice(0, 3).map((skill, index) => (
                           <span
@@ -366,6 +318,9 @@ function AdminDashboard({ onLogout }) {
                           </span>
                         )}
                       </div>
+                      {applicant.experience && (
+                        <div className="text-xs text-gray-500 mt-1">Exp: {applicant.experience}</div>
+                      )}
                     </td>
                     <td className="py-4 px-6">
                       <span
@@ -375,6 +330,9 @@ function AdminDashboard({ onLogout }) {
                       >
                         {getStatusText(applicant.status)}
                       </span>
+                      {applicant.interviewCode && (
+                        <div className="text-xs text-gray-500 mt-1 font-mono">Code: {applicant.interviewCode}</div>
+                      )}
                     </td>
                     <td className="py-4 px-6">
                       {applicant.status === "interview_completed" && applicant.interviewResults ? (
@@ -387,10 +345,28 @@ function AdminDashboard({ onLogout }) {
                             <div>Coding: {applicant.interviewResults.codingScore}%</div>
                             <div>HR: {applicant.interviewResults.hrScore}%</div>
                           </div>
+                          <div className="text-xs text-gray-400">
+                            Completed: {new Date(applicant.interviewResults.completedAt).toLocaleDateString()}
+                          </div>
                         </div>
                       ) : (
                         <span className="text-sm text-gray-400">Not available</span>
                       )}
+                    </td>
+                    <td className="py-4 px-6">
+                      <button
+                        onClick={() => handleViewResume(applicant)}
+                        className="flex items-center space-x-2 px-3 py-1 bg-indigo-100 hover:bg-indigo-200 text-indigo-700 rounded-lg text-sm font-medium transition-colors duration-300"
+                      >
+                        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                          <path
+                            fillRule="evenodd"
+                            d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z"
+                            clipRule="evenodd"
+                          />
+                        </svg>
+                        <span>View</span>
+                      </button>
                     </td>
                     <td className="py-4 px-6">
                       {applicant.status === "pending" || applicant.status === "under_review" ? (
@@ -449,6 +425,142 @@ function AdminDashboard({ onLogout }) {
           )}
         </div>
       </main>
+
+      {/* Resume Modal */}
+      {showResumeModal && selectedApplicant && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-hidden">
+            <div className="flex items-center justify-between p-6 border-b border-gray-200">
+              <div>
+                <h3 className="text-xl font-bold text-gray-800">Resume - {selectedApplicant.name}</h3>
+                <p className="text-gray-600">{selectedApplicant.resumeData?.fileName}</p>
+              </div>
+              <button
+                onClick={() => setShowResumeModal(false)}
+                className="p-2 hover:bg-gray-100 rounded-lg transition-colors duration-300"
+              >
+                <svg className="w-6 h-6 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <div className="p-6">
+              <div className="space-y-4">
+                <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
+                  <div className="flex items-center space-x-3">
+                    <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
+                      <svg className="w-5 h-5 text-blue-600" fill="currentColor" viewBox="0 0 20 20">
+                        <path
+                          fillRule="evenodd"
+                          d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z"
+                          clipRule="evenodd"
+                        />
+                      </svg>
+                    </div>
+                    <div>
+                      <p className="font-medium text-gray-800">{selectedApplicant.resumeData?.fileName}</p>
+                      <p className="text-sm text-gray-500">Resume Document</p>
+                    </div>
+                  </div>
+                  <a
+                    href={selectedApplicant.resumeData?.downloadUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center space-x-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-colors duration-300"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                      />
+                    </svg>
+                    <span>Download</span>
+                  </a>
+                </div>
+
+                {/* Candidate Details */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-3">
+                    <div>
+                      <label className="text-sm font-semibold text-gray-700">Email</label>
+                      <p className="text-gray-800">{selectedApplicant.email}</p>
+                    </div>
+                    <div>
+                      <label className="text-sm font-semibold text-gray-700">Phone</label>
+                      <p className="text-gray-800">{selectedApplicant.phone}</p>
+                    </div>
+                    <div>
+                      <label className="text-sm font-semibold text-gray-700">Institution</label>
+                      <p className="text-gray-800">{selectedApplicant.institution}</p>
+                    </div>
+                    <div>
+                      <label className="text-sm font-semibold text-gray-700">Education</label>
+                      <p className="text-gray-800">{selectedApplicant.education}</p>
+                    </div>
+                  </div>
+                  <div className="space-y-3">
+                    <div>
+                      <label className="text-sm font-semibold text-gray-700">Desired Role</label>
+                      <p className="text-gray-800">{selectedApplicant.role || "General Position"}</p>
+                    </div>
+                    {selectedApplicant.experience && (
+                      <div>
+                        <label className="text-sm font-semibold text-gray-700">Experience</label>
+                        <p className="text-gray-800">{selectedApplicant.experience}</p>
+                      </div>
+                    )}
+                    {selectedApplicant.linkedin && (
+                      <div>
+                        <label className="text-sm font-semibold text-gray-700">LinkedIn</label>
+                        <a
+                          href={selectedApplicant.linkedin}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-blue-600 hover:text-blue-800 underline"
+                        >
+                          View Profile
+                        </a>
+                      </div>
+                    )}
+                    {selectedApplicant.github && (
+                      <div>
+                        <label className="text-sm font-semibold text-gray-700">GitHub</label>
+                        <a
+                          href={selectedApplicant.github}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-blue-600 hover:text-blue-800 underline"
+                        >
+                          View Profile
+                        </a>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Skills */}
+                {selectedApplicant.skills && selectedApplicant.skills.length > 0 && (
+                  <div>
+                    <label className="text-sm font-semibold text-gray-700 mb-2 block">Skills</label>
+                    <div className="flex flex-wrap gap-2">
+                      {selectedApplicant.skills.map((skill, index) => (
+                        <span
+                          key={index}
+                          className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-sm font-medium"
+                        >
+                          {skill}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
