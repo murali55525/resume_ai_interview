@@ -1,0 +1,468 @@
+const express = require("express")
+const mongoose = require("mongoose")
+const multer = require("multer")
+const cors = require("cors")
+const nodemailer = require("nodemailer")
+const path = require("path")
+const fs = require("fs")
+require("dotenv").config()
+
+const app = express()
+
+// CORS configuration
+app.use(
+  cors({
+    origin: ["http://localhost:5173", "http://localhost:3000"],
+    credentials: true,
+  }),
+)
+
+app.use(express.json())
+app.use(express.urlencoded({ extended: true }))
+
+// Create uploads directory if it doesn't exist
+const uploadsDir = path.join(__dirname, "uploads")
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true })
+}
+
+// MongoDB connection with better error handling
+const MONGODB_URI =
+  process.env.MONGODB_URI ||
+  "mongodb+srv://muralikarthickm22it:Murali%40123@cluster0.mongodb.net/cloudcomputing?retryWrites=true&w=majority"
+
+mongoose
+  .connect(MONGODB_URI, {
+    useNewUrlParser: true,
+    useUnifiedTopology: true,
+  })
+  .then(() => {
+    console.log("✅ MongoDB connected successfully")
+    console.log("Database:", mongoose.connection.db.databaseName)
+  })
+  .catch((err) => {
+    console.error("❌ MongoDB connection error:", err)
+    console.error(
+      'If you see "Could not connect to any servers", make sure your current IP address is whitelisted in your MongoDB Atlas cluster. ' +
+        "Go to https://cloud.mongodb.com, select your cluster, then Network Access > IP Access List, and add your current IP or 0.0.0.0/0 for open access (not recommended for production).",
+    )
+    process.exit(1)
+  })
+
+// Enhanced Mongoose schema with better validation
+const applicantSchema = new mongoose.Schema(
+  {
+    name: { type: String, required: true, trim: true },
+    email: {
+      type: String,
+      required: true,
+      unique: true,
+      lowercase: true,
+      trim: true,
+      match: [/^\w+([.-]?\w+)*@\w+([.-]?\w+)*(\.\w{2,3})+$/, "Please enter a valid email"],
+    },
+    phone: { type: String, required: true, trim: true },
+    institution: { type: String, required: true, trim: true },
+    address: { type: String, trim: true },
+    experience: { type: String, trim: true },
+    education: { type: String, required: true, trim: true },
+    linkedin: { type: String, trim: true },
+    portfolio: { type: String, trim: true },
+    github: { type: String, trim: true },
+    role: { type: String, trim: true },
+    skills: [{ type: String, trim: true }],
+    resumeUrl: String,
+    status: {
+      type: String,
+      enum: ["pending", "under_review", "approved", "rejected"],
+      default: "pending",
+    },
+    interviewCode: String,
+    interviewCodeExpiry: Date,
+    createdAt: { type: Date, default: Date.now },
+    updatedAt: { type: Date, default: Date.now },
+  },
+  {
+    timestamps: true,
+  },
+)
+
+// Add indexes for better performance
+applicantSchema.index({ email: 1 })
+applicantSchema.index({ status: 1 })
+applicantSchema.index({ createdAt: -1 })
+
+const Applicant = mongoose.model("Applicant", applicantSchema, "client")
+
+// Email configuration
+const transporter = nodemailer.createTransport({
+  service: "gmail",
+  auth: {
+    user: process.env.EMAIL_USER || "your-email@gmail.com",
+    pass: process.env.EMAIL_PASS || "your-app-password",
+  },
+})
+
+// Generate random interview code
+const generateInterviewCode = () => {
+  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+  let result = ""
+  for (let i = 0; i < 6; i++) {
+    result += chars.charAt(Math.floor(Math.random() * chars.length))
+  }
+  return result
+}
+
+// Send email function
+const sendEmail = async (to, subject, html) => {
+  try {
+    await transporter.sendMail({
+      from: process.env.EMAIL_USER || "noreply@company.com",
+      to,
+      subject,
+      html,
+    })
+    console.log(`✅ Email sent to ${to}`)
+  } catch (error) {
+    console.error("❌ Email sending failed:", error)
+    // Don't throw error to prevent breaking the flow
+  }
+}
+
+// Multer setup for file upload with better error handling
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, uploadsDir)
+  },
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9)
+    cb(null, `${uniqueSuffix}-${file.originalname}`)
+  },
+})
+
+const upload = multer({
+  storage,
+  limits: {
+    fileSize: 5 * 1024 * 1024, // 5MB limit
+  },
+  fileFilter: (req, file, cb) => {
+    const allowedTypes = [
+      "text/plain",
+      "application/pdf",
+      "application/msword",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ]
+    if (allowedTypes.includes(file.mimetype)) {
+      cb(null, true)
+    } else {
+      cb(new Error("Invalid file type. Only TXT, PDF, DOC, and DOCX are allowed."))
+    }
+  },
+})
+
+// Health check endpoint
+app.get("/api/health", (req, res) => {
+  res.json({
+    status: "OK",
+    timestamp: new Date().toISOString(),
+    database: mongoose.connection.readyState === 1 ? "connected" : "disconnected",
+  })
+})
+
+// Endpoint to check if resume already uploaded
+app.get("/api/client/check-resume", async (req, res) => {
+  try {
+    const { email } = req.query
+    console.log(`🔍 Checking resume for email: ${email}`)
+
+    if (!email) {
+      return res.status(400).json({ exists: false, error: "Email is required" })
+    }
+
+    const exists = await Applicant.exists({ email: email.toLowerCase().trim() })
+    console.log(`📋 Resume exists for ${email}: ${!!exists}`)
+
+    res.json({ exists: !!exists })
+  } catch (err) {
+    console.error("❌ Check resume error:", err)
+    res.status(500).json({ error: "Server error" })
+  }
+})
+
+// Endpoint to get application data
+app.get("/api/client/application", async (req, res) => {
+  try {
+    const { email } = req.query
+    console.log(`🔍 Fetching application for email: ${email}`)
+
+    if (!email) {
+      return res.status(400).json({ error: "Email is required" })
+    }
+
+    const application = await Applicant.findOne({ email: email.toLowerCase().trim() })
+    console.log(`📋 Application found for ${email}: ${!!application}`)
+
+    if (!application) {
+      return res.status(404).json({ error: "Application not found" })
+    }
+
+    res.json(application)
+  } catch (err) {
+    console.error("❌ Get application error:", err)
+    res.status(500).json({ error: "Server error" })
+  }
+})
+
+// Endpoint to receive client application
+app.post("/api/client/apply", upload.single("resume"), async (req, res) => {
+  try {
+    console.log("📝 Received application submission")
+    console.log("Body:", req.body)
+    console.log("File:", req.file ? req.file.filename : "No file")
+
+    const { email } = req.body
+
+    if (!email) {
+      return res.status(400).json({ error: "Email is required" })
+    }
+
+    // Check if application already exists
+    const exists = await Applicant.exists({ email: email.toLowerCase().trim() })
+    if (exists) {
+      console.log(`⚠️ Application already exists for email: ${email}`)
+      return res.status(400).json({ error: "Application already submitted for this email." })
+    }
+
+    const { name, phone, institution, address, experience, education, linkedin, portfolio, github, role, skills } =
+      req.body
+
+    // Validate required fields
+    if (!name || !phone || !institution || !education || !req.file) {
+      return res.status(400).json({ error: "Required fields and resume file are missing" })
+    }
+
+    const resumeUrl = `/uploads/${req.file.filename}`
+
+    const applicant = new Applicant({
+      name: name.trim(),
+      email: email.toLowerCase().trim(),
+      phone: phone.trim(),
+      institution: institution.trim(),
+      address: address?.trim() || "",
+      experience: experience?.trim() || "",
+      education: education.trim(),
+      linkedin: linkedin?.trim() || "",
+      portfolio: portfolio?.trim() || "",
+      github: github?.trim() || "",
+      role: role?.trim() || "",
+      skills: skills ? JSON.parse(skills) : [],
+      resumeUrl,
+      status: "pending",
+    })
+
+    await applicant.save()
+    console.log(`✅ Application saved for: ${email}`)
+
+    // Send confirmation email to applicant
+    const confirmationHtml = `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+        <h2 style="color: #2563eb;">Application Received Successfully!</h2>
+        <p>Dear ${name},</p>
+        <p>Thank you for submitting your application. We have received your details and resume.</p>
+        <div style="background-color: #f3f4f6; padding: 20px; border-radius: 8px; margin: 20px 0;">
+          <h3 style="color: #374151; margin-top: 0;">Application Summary:</h3>
+          <p><strong>Name:</strong> ${name}</p>
+          <p><strong>Email:</strong> ${email}</p>
+          <p><strong>Role:</strong> ${role || "General Position"}</p>
+          <p><strong>Institution:</strong> ${institution}</p>
+        </div>
+        <p>Our team will review your application and get back to you within 2-3 business days.</p>
+        <p>Best regards,<br>The Recruitment Team</p>
+      </div>
+    `
+
+    await sendEmail(email, "Application Received - AI Interview Platform", confirmationHtml)
+
+    res.json({ success: true, message: "Application submitted successfully" })
+  } catch (err) {
+    console.error("❌ Apply error:", err)
+    if (err.code === 11000) {
+      // Duplicate key error
+      res.status(400).json({ error: "Application already exists for this email" })
+    } else {
+      res.status(500).json({ error: "Failed to save application data" })
+    }
+  }
+})
+
+// Admin endpoint to get all applicants
+app.get("/api/admin/applicants", async (req, res) => {
+  try {
+    console.log("🔍 Fetching all applicants")
+    const applicants = await Applicant.find({}).sort({ createdAt: -1 })
+    console.log(`📋 Found ${applicants.length} applicants`)
+    res.json(applicants)
+  } catch (err) {
+    console.error("❌ Get applicants error:", err)
+    res.status(500).json({ error: "Failed to fetch applicants" })
+  }
+})
+
+// Admin endpoint to approve applicant
+app.post("/api/admin/approve-applicant", async (req, res) => {
+  try {
+    const { applicantId, email, name } = req.body
+    console.log(`✅ Approving applicant: ${email}`)
+
+    // Generate interview code
+    const interviewCode = generateInterviewCode()
+    const interviewCodeExpiry = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) // 7 days from now
+
+    // Update applicant status
+    await Applicant.findByIdAndUpdate(applicantId, {
+      status: "approved",
+      interviewCode,
+      interviewCodeExpiry,
+      updatedAt: new Date(),
+    })
+
+    // Send approval email with interview code
+    const approvalHtml = `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+        <h2 style="color: #059669;">Congratulations! You've Been Approved for Interview</h2>
+        <p>Dear ${name},</p>
+        <p>Great news! Your application has been reviewed and approved. You are now eligible to take the AI interview.</p>
+        
+        <div style="background-color: #ecfdf5; border: 2px solid #10b981; padding: 20px; border-radius: 8px; margin: 20px 0; text-align: center;">
+          <h3 style="color: #065f46; margin-top: 0;">Your Interview Code</h3>
+          <div style="font-size: 24px; font-weight: bold; color: #059669; letter-spacing: 3px; font-family: monospace;">
+            ${interviewCode}
+          </div>
+          <p style="color: #047857; margin-bottom: 0;">Use this code to access your interview</p>
+        </div>
+        
+        <div style="background-color: #f3f4f6; padding: 20px; border-radius: 8px; margin: 20px 0;">
+          <h3 style="color: #374151; margin-top: 0;">Next Steps:</h3>
+          <ol style="color: #4b5563;">
+            <li>Log in to your client dashboard</li>
+            <li>Click on "Enter Interview Code"</li>
+            <li>Enter the code: <strong>${interviewCode}</strong></li>
+            <li>Complete your interview assessment</li>
+          </ol>
+        </div>
+        
+        <p style="color: #dc2626;"><strong>Important:</strong> This code will expire in 7 days. Please complete your interview before then.</p>
+        
+        <p>Good luck with your interview!</p>
+        <p>Best regards,<br>The Recruitment Team</p>
+      </div>
+    `
+
+    await sendEmail(email, "Interview Approved - Your Interview Code Inside", approvalHtml)
+
+    res.json({ success: true, message: "Applicant approved and interview code sent" })
+  } catch (err) {
+    console.error("❌ Approve applicant error:", err)
+    res.status(500).json({ error: "Failed to approve applicant" })
+  }
+})
+
+// Admin endpoint to reject applicant
+app.post("/api/admin/reject-applicant", async (req, res) => {
+  try {
+    const { applicantId, email } = req.body
+    console.log(`❌ Rejecting applicant: ${email}`)
+
+    // Update applicant status
+    const applicant = await Applicant.findByIdAndUpdate(applicantId, {
+      status: "rejected",
+      updatedAt: new Date(),
+    })
+
+    // Send rejection email
+    const rejectionHtml = `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+        <h2 style="color: #dc2626;">Application Update</h2>
+        <p>Dear ${applicant.name},</p>
+        <p>Thank you for your interest in our position and for taking the time to submit your application.</p>
+        <p>After careful consideration, we have decided not to move forward with your application at this time. This decision was not easy, as we received many qualified applications.</p>
+        <div style="background-color: #f3f4f6; padding: 20px; border-radius: 8px; margin: 20px 0;">
+          <p style="color: #4b5563; margin: 0;">We encourage you to apply for future opportunities that match your skills and experience. We will keep your information on file for consideration for other suitable positions.</p>
+        </div>
+        <p>We appreciate your interest in our company and wish you the best in your job search.</p>
+        <p>Best regards,<br>The Recruitment Team</p>
+      </div>
+    `
+
+    await sendEmail(email, "Application Status Update", rejectionHtml)
+
+    res.json({ success: true, message: "Applicant rejected and notification sent" })
+  } catch (err) {
+    console.error("❌ Reject applicant error:", err)
+    res.status(500).json({ error: "Failed to reject applicant" })
+  }
+})
+
+// Endpoint to verify interview code
+app.post("/api/client/verify-interview-code", async (req, res) => {
+  try {
+    const { email, code } = req.body
+    console.log(`🔍 Verifying interview code for: ${email}`)
+
+    const applicant = await Applicant.findOne({
+      email: email.toLowerCase().trim(),
+      interviewCode: code.toUpperCase().trim(),
+      status: "approved",
+      interviewCodeExpiry: { $gt: new Date() },
+    })
+
+    if (!applicant) {
+      console.log(`❌ Invalid or expired code for: ${email}`)
+      return res.status(400).json({
+        success: false,
+        error: "Invalid or expired interview code",
+      })
+    }
+
+    console.log(`✅ Valid interview code for: ${email}`)
+    res.json({
+      success: true,
+      interviewData: {
+        name: applicant.name,
+        role: applicant.role,
+        task: "Describe your experience with the technologies mentioned in your resume and how you would approach solving complex technical challenges in a team environment.",
+      },
+    })
+  } catch (err) {
+    console.error("❌ Verify code error:", err)
+    res.status(500).json({ error: "Failed to verify interview code" })
+  }
+})
+
+// Serve uploaded files
+app.use("/uploads", express.static(uploadsDir))
+
+// Error handling middleware
+app.use((err, req, res, next) => {
+  console.error("❌ Server error:", err)
+
+  if (err instanceof multer.MulterError) {
+    if (err.code === "LIMIT_FILE_SIZE") {
+      return res.status(400).json({ error: "File too large. Maximum size is 5MB." })
+    }
+  }
+
+  res.status(500).json({ error: "Internal server error" })
+})
+
+// 404 handler
+app.use((req, res) => {
+  console.log(`❌ 404 - Route not found: ${req.method} ${req.path}`)
+  res.status(404).json({ error: "Route not found" })
+})
+
+const PORT = process.env.PORT || 5000
+app.listen(PORT, () => {
+  console.log(`🚀 Server running on port ${PORT}`)
+  console.log(`📊 Health check: http://localhost:${PORT}/api/health`)
+})
