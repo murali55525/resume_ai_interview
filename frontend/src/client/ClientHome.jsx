@@ -47,9 +47,6 @@ function ClientHome({ onBack, task }) {
   const [interviewResults, setInterviewResults] = useState(null)
   const [hasApplication, setHasApplication] = useState(false)
 
-  // Gemini API key
-  const GEMINI_API_KEY = "AIzaSyBe2gAXouTuPzR0HuqY6cSLL40OWjblklw"
-
   // Check for existing user session on component mount
   useEffect(() => {
     const checkExistingSession = async () => {
@@ -128,21 +125,25 @@ function ClientHome({ onBack, task }) {
   }, [formData, resumeFile])
 
   const handleLogin = (userData) => {
+    console.log("🔐 User logged in:", userData)
     setUser(userData)
-    setFormData({
-      name: userData.name || "",
-      email: userData.email || "",
-      phone: userData.phone || "",
-      institution: userData.institution || "",
-      address: userData.address || "",
-      experience: userData.experience || "",
-      education: userData.education || "",
-      linkedin: userData.linkedin || "",
-      portfolio: userData.portfolio || "",
-      github: userData.github || "",
-      role: userData.role || "",
-      skills: userData.skills || [],
-    })
+
+    // Update form data with user information
+    setFormData((prevData) => ({
+      ...prevData,
+      name: userData.name || prevData.name,
+      email: userData.email || prevData.email,
+      phone: userData.phone || prevData.phone,
+      institution: userData.institution || prevData.institution,
+      address: userData.address || prevData.address,
+      experience: userData.experience || prevData.experience,
+      education: userData.education || prevData.education,
+      linkedin: userData.linkedin || prevData.linkedin,
+      portfolio: userData.portfolio || prevData.portfolio,
+      github: userData.github || prevData.github,
+      role: userData.role || prevData.role,
+      skills: userData.skills || prevData.skills,
+    }))
 
     // Check if user has application
     if (userData.hasApplication) {
@@ -161,7 +162,7 @@ function ClientHome({ onBack, task }) {
     })
   }
 
-  // Resume parsing with Gemini API
+  // Enhanced resume parsing with backend API
   const handleUpload = async (e) => {
     if (uploadBlocked) return
     const file = e.target.files?.[0] || e.dataTransfer?.files?.[0]
@@ -169,91 +170,55 @@ function ClientHome({ onBack, task }) {
 
     setIsLoading(true)
     setResumeFile(file)
+    setError("")
 
-    const reader = new FileReader()
-    reader.onload = async (evt) => {
-      try {
-        const resumeText = evt.target.result
+    try {
+      console.log("📄 Processing resume file:", file.name, "Type:", file.type)
 
-        const response = await axios.post(
-          "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent",
-          {
-            contents: [
-              {
-                parts: [
-                  {
-                    text: `Parse the following resume text and extract the details in JSON format. Ensure the output is a valid JSON object with the following fields:
-                    - full_name: The candidate's full name
-                    - email: The email address (e.g., user@domain.com)
-                    - phone: The phone number (in any standard format, e.g., +1234567890, (123) 456-7890)
-                    - institution: The most recent educational institution (e.g., university or college name)
-                    - address: The candidate's address (city, state, country, or full address if available)
-                    - experience: Years of relevant work experience (as a number or string, e.g., "5 years")
-                    - education: Highest degree and field of study (e.g., "B.S. Computer Science")
-                    - linkedin: LinkedIn profile URL (if available, e.g., https://linkedin.com/in/username)
-                    - portfolio: Portfolio website URL (if available)
-                    - github: GitHub profile URL (if available, e.g., https://github.com/username)
-                    - role: Suggested job role based on content
-                    - skills: Array of key skills (e.g., ["JavaScript", "React"])
+      // Create FormData for file upload
+      const uploadFormData = new FormData()
+      uploadFormData.append("resume", file)
 
-                    If a field is not found, return an empty string or empty array for skills. Handle various resume formats (e.g., PDF, DOCX, TXT) and ensure the output is valid JSON. Return only a valid JSON object.
+      // Send to backend for parsing
+      const response = await axios.post("http://localhost:5000/api/client/parse-resume", uploadFormData, {
+        headers: {
+          "Content-Type": "multipart/form-data",
+        },
+        timeout: 30000, // 30 seconds timeout for file processing
+      })
 
-                    Resume Text:
-                    ${resumeText}`,
-                  },
-                ],
-              },
-            ],
-          },
-          {
-            headers: {
-              "Content-Type": "application/json",
-              "x-goog-api-key": GEMINI_API_KEY,
-            },
-          },
-        )
+      console.log("✅ Resume parsed successfully:", response.data)
 
-        console.log("Gemini raw response:", response.data)
+      const parsedData = response.data.data
 
-        let parsedData
-        const responseText = response.data.candidates[0].content.parts[0].text
-        const jsonMatch = responseText.match(/```json\n([\s\S]*?)\n```/)
-        if (jsonMatch && jsonMatch[1]) {
-          parsedData = JSON.parse(jsonMatch[1])
-        } else {
-          parsedData = JSON.parse(responseText)
-        }
+      // Update form data with parsed information - Keep existing email from logged in user
+      setFormData((prevData) => ({
+        name: parsedData.full_name || prevData.name,
+        email: prevData.email, // Keep existing email from user login
+        phone: parsedData.phone || prevData.phone,
+        institution: parsedData.institution || prevData.institution,
+        address: parsedData.address || prevData.address,
+        experience: parsedData.experience || prevData.experience,
+        education: parsedData.education || prevData.education,
+        linkedin: parsedData.linkedin || prevData.linkedin,
+        portfolio: parsedData.portfolio || prevData.portfolio,
+        github: parsedData.github || prevData.github,
+        role: parsedData.role || prevData.role,
+        skills: Array.isArray(parsedData.skills) ? parsedData.skills : prevData.skills,
+      }))
 
-        console.log("Parsed resume data:", parsedData)
+      setResumeAnalysis({
+        role: parsedData.role || "General Position",
+        skills: Array.isArray(parsedData.skills) ? parsedData.skills : [],
+      })
 
-        // Update form data with parsed information
-        setFormData((prev) => ({
-          ...prev,
-          name: parsedData.full_name || prev.name,
-          phone: parsedData.phone || prev.phone,
-          institution: parsedData.institution || prev.institution,
-          address: parsedData.address || prev.address,
-          experience: parsedData.experience || prev.experience,
-          education: parsedData.education || prev.education,
-          linkedin: parsedData.linkedin || prev.linkedin,
-          portfolio: parsedData.portfolio || prev.portfolio,
-          github: parsedData.github || prev.github,
-          role: parsedData.role || prev.role,
-          skills: parsedData.skills || prev.skills,
-        }))
-
-        setResumeAnalysis({
-          role: parsedData.role || "General Position",
-          skills: parsedData.skills || [],
-        })
-        setIsLoading(false)
-      } catch (err) {
-        setError("Failed to process resume with Gemini AI. Please check the resume format and try again.")
-        console.error("Resume parsing error:", err.message, err.response?.data)
-        setIsLoading(false)
-      }
+      setIsLoading(false)
+      console.log("✅ Resume processing completed successfully")
+    } catch (err) {
+      console.error("❌ Resume parsing error:", err)
+      setError(err.response?.data?.error || "Failed to process resume. Please check the file format and try again.")
+      setIsLoading(false)
     }
-    reader.readAsText(file)
   }
 
   const handleDrag = (e) => {
@@ -278,16 +243,33 @@ function ClientHome({ onBack, task }) {
     setIsLoading(true)
     setError("")
 
+    // Validate user is logged in
+    if (!user || !user.email) {
+      setError("Please log in first before submitting your application.")
+      setIsLoading(false)
+      return
+    }
+
+    console.log("📝 Submitting application for user:", user.email)
+
     const submitData = new FormData()
+
+    // Use the logged-in user's email
+    submitData.append("email", user.email)
+
+    // Add all other form data
     Object.keys(formData).forEach((key) => {
       if (key === "skills") {
         submitData.append(key, JSON.stringify(formData[key]))
-      } else {
+      } else if (key !== "email") {
+        // Skip email since we're using user.email
         submitData.append(key, formData[key])
       }
     })
 
-    if (resumeFile) submitData.append("resume", resumeFile)
+    if (resumeFile) {
+      submitData.append("resume", resumeFile)
+    }
 
     try {
       console.log("Submitting application...")
@@ -428,6 +410,13 @@ function ClientHome({ onBack, task }) {
             <p className="text-gray-600 text-lg">
               {hasApplication ? "Update your professional information" : "Fill in your details to apply"}
             </p>
+            {user && (
+              <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                <p className="text-blue-800 text-sm">
+                  <span className="font-semibold">Logged in as:</span> {user.name} ({user.email})
+                </p>
+              </div>
+            )}
             {!hasApplication && (
               <div className="mt-6 max-w-md mx-auto">
                 <div className="flex items-center justify-between mb-2">
@@ -503,13 +492,16 @@ function ClientHome({ onBack, task }) {
                               />
                             </svg>
                           </div>
-                          <p className="text-gray-600 font-medium">Analyzing your resume...</p>
+                          <div>
+                            <p className="text-blue-600 font-semibold">Processing your resume...</p>
+                            <p className="text-gray-500 text-sm">This may take a few moments</p>
+                          </div>
                         </div>
                       ) : (
                         <div className="space-y-4">
-                          <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto">
+                          <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto">
                             <svg
-                              className="w-8 h-8 text-blue-600"
+                              className="w-8 h-8 text-gray-400"
                               fill="none"
                               stroke="currentColor"
                               viewBox="0 0 24 24"
@@ -523,83 +515,65 @@ function ClientHome({ onBack, task }) {
                             </svg>
                           </div>
                           <div>
-                            <p className="text-gray-700 text-lg font-semibold mb-2">
-                              {dragActive ? "Drop your resume here" : "Upload your resume"}
+                            <p className="text-gray-700 font-semibold">
+                              Drop your resume here or <span className="text-blue-600 underline">browse files</span>
                             </p>
-                            <p className="text-gray-500 text-sm mb-4">
-                              Drag & drop or click to browse • AI will auto-fill your details
-                            </p>
-                            <div className="flex items-center justify-center space-x-2 text-xs text-gray-400">
-                              <span className="px-2 py-1 bg-gray-100 rounded-full">PDF</span>
-                              <span className="px-2 py-1 bg-gray-100 rounded-full">DOC</span>
-                              <span className="px-2 py-1 bg-gray-100 rounded-full">TXT</span>
-                            </div>
+                            <p className="text-gray-500 text-sm">Supports PDF, TXT, DOC, DOCX (max 5MB)</p>
                           </div>
                         </div>
                       )}
                     </div>
                   ) : (
-                    <div className="bg-green-50 border-2 border-green-200 rounded-xl p-6">
+                    <div className="bg-green-50 border border-green-200 rounded-xl p-6">
                       <div className="flex items-center space-x-4">
-                        <div className="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center">
-                          <svg className="w-6 h-6 text-green-600" fill="currentColor" viewBox="0 0 20 20">
+                        <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center">
+                          <svg className="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path
-                              fillRule="evenodd"
-                              d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z"
-                              clipRule="evenodd"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
                             />
                           </svg>
                         </div>
                         <div className="flex-1">
-                          <p className="text-green-800 font-semibold">{resumeFile.name}</p>
+                          <p className="font-semibold text-green-800">{resumeFile.name}</p>
                           <p className="text-green-600 text-sm">
-                            {(resumeFile.size / 1024).toFixed(1)} KB • Uploaded successfully
+                            {(resumeFile.size / 1024 / 1024).toFixed(2)} MB • Uploaded successfully
                           </p>
                         </div>
-                        <div className="text-green-600">
-                          <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 20 20">
-                            <path
-                              fillRule="evenodd"
-                              d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
-                              clipRule="evenodd"
-                            />
-                          </svg>
-                        </div>
                       </div>
-                    </div>
-                  )}
-
-                  {resumeAnalysis && (
-                    <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-6">
-                      <div className="flex items-start space-x-4">
-                        <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
-                          <svg className="w-6 h-6 text-blue-600" fill="currentColor" viewBox="0 0 20 20">
-                            <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                          </svg>
-                        </div>
-                        <div className="flex-1">
-                          <h4 className="text-blue-800 font-bold text-lg mb-3">AI Resume Analysis</h4>
+                      {resumeAnalysis && (
+                        <div className="mt-4 p-4 bg-white rounded-lg border border-green-200">
+                          <h4 className="font-semibold text-gray-800 mb-2">Resume Analysis</h4>
                           <div className="space-y-2">
-                            <div>
-                              <span className="text-blue-700 font-medium">Suggested Role: </span>
-                              <span className="text-gray-800 font-semibold">{resumeAnalysis.role}</span>
-                            </div>
-                            <div>
-                              <span className="text-blue-700 font-medium">Key Skills: </span>
-                              <div className="flex flex-wrap gap-2 mt-2">
-                                {resumeAnalysis.skills.map((skill, i) => (
-                                  <span
-                                    key={i}
-                                    className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-sm font-medium"
-                                  >
-                                    {skill}
-                                  </span>
-                                ))}
+                            <p className="text-sm">
+                              <span className="font-medium">Suggested Role:</span>{" "}
+                              <span className="text-blue-600">{resumeAnalysis.role}</span>
+                            </p>
+                            {resumeAnalysis.skills.length > 0 && (
+                              <div>
+                                <span className="font-medium text-sm">Extracted Skills:</span>
+                                <div className="flex flex-wrap gap-1 mt-1">
+                                  {resumeAnalysis.skills.slice(0, 8).map((skill, index) => (
+                                    <span
+                                      key={index}
+                                      className="px-2 py-1 bg-blue-100 text-blue-800 text-xs rounded-full"
+                                    >
+                                      {skill}
+                                    </span>
+                                  ))}
+                                  {resumeAnalysis.skills.length > 8 && (
+                                    <span className="px-2 py-1 bg-gray-100 text-gray-600 text-xs rounded-full">
+                                      +{resumeAnalysis.skills.length - 8} more
+                                    </span>
+                                  )}
+                                </div>
                               </div>
-                            </div>
+                            )}
                           </div>
                         </div>
-                      </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -613,78 +587,83 @@ function ClientHome({ onBack, task }) {
                     <div>
                       <label className="block text-sm font-semibold text-gray-700 mb-2">Full Name *</label>
                       <input
+                        type="text"
                         name="name"
                         value={formData.name}
                         onChange={handleInputChange}
                         required
+                        className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 bg-white/80 backdrop-blur-sm"
                         placeholder="Enter your full name"
-                        className="w-full bg-white border-2 border-gray-200 rounded-xl px-4 py-3 text-gray-800 placeholder-gray-400 focus:outline-none focus:border-blue-500 focus:bg-blue-50/50 transition-all duration-300"
                       />
                     </div>
                     <div>
                       <label className="block text-sm font-semibold text-gray-700 mb-2">Email Address *</label>
                       <input
+                        type="email"
                         name="email"
                         value={formData.email}
                         onChange={handleInputChange}
                         required
-                        type="email"
-                        placeholder="your.email@example.com"
-                        className="w-full bg-white border-2 border-gray-200 rounded-xl px-4 py-3 text-gray-800 placeholder-gray-400 focus:outline-none focus:border-blue-500 focus:bg-blue-50/50 transition-all duration-300"
-                        readOnly={hasApplication}
+                        disabled={!!user} // Disable if user is logged in
+                        className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 bg-white/80 backdrop-blur-sm disabled:bg-gray-100 disabled:cursor-not-allowed"
+                        placeholder="Enter your email address"
                       />
+                      {user && <p className="text-xs text-gray-500 mt-1">Email cannot be changed after login</p>}
                     </div>
                     <div>
                       <label className="block text-sm font-semibold text-gray-700 mb-2">Phone Number *</label>
                       <input
+                        type="tel"
                         name="phone"
                         value={formData.phone}
                         onChange={handleInputChange}
                         required
-                        type="tel"
-                        placeholder="+1 (555) 123-4567"
-                        className="w-full bg-white border-2 border-gray-200 rounded-xl px-4 py-3 text-gray-800 placeholder-gray-400 focus:outline-none focus:border-blue-500 focus:bg-blue-50/50 transition-all duration-300"
+                        className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 bg-white/80 backdrop-blur-sm"
+                        placeholder="Enter your phone number"
                       />
                     </div>
                     <div>
-                      <label className="block text-sm font-semibold text-gray-700 mb-2">Address</label>
+                      <label className="block text-sm font-semibold text-gray-700 mb-2">Institution *</label>
                       <input
-                        name="address"
-                        value={formData.address}
+                        type="text"
+                        name="institution"
+                        value={formData.institution}
                         onChange={handleInputChange}
-                        placeholder="City, State, Country"
-                        className="w-full bg-white border-2 border-gray-200 rounded-xl px-4 py-3 text-gray-800 placeholder-gray-400 focus:outline-none focus:border-blue-500 focus:bg-blue-50/50 transition-all duration-300"
+                        required
+                        className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 bg-white/80 backdrop-blur-sm"
+                        placeholder="Your college/university"
                       />
                     </div>
                   </div>
                 </div>
 
-                {/* Education & Experience */}
+                {/* Professional Information */}
                 <div className="space-y-6">
                   <h3 className="text-xl font-bold text-gray-800 border-b border-gray-200 pb-2">
-                    Education & Experience
+                    Professional Information
                   </h3>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div>
-                      <label className="block text-sm font-semibold text-gray-700 mb-2">Institution *</label>
-                      <input
-                        name="institution"
-                        value={formData.institution}
-                        onChange={handleInputChange}
-                        required
-                        placeholder="University/College name"
-                        className="w-full bg-white border-2 border-gray-200 rounded-xl px-4 py-3 text-gray-800 placeholder-gray-400 focus:outline-none focus:border-blue-500 focus:bg-blue-50/50 transition-all duration-300"
-                      />
-                    </div>
-                    <div>
                       <label className="block text-sm font-semibold text-gray-700 mb-2">Education *</label>
                       <input
+                        type="text"
                         name="education"
                         value={formData.education}
                         onChange={handleInputChange}
                         required
-                        placeholder="B.S. Computer Science"
-                        className="w-full bg-white border-2 border-gray-200 rounded-xl px-4 py-3 text-gray-800 placeholder-gray-400 focus:outline-none focus:border-blue-500 focus:bg-blue-50/50 transition-all duration-300"
+                        className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 bg-white/80 backdrop-blur-sm"
+                        placeholder="e.g., B.Tech Computer Science"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-700 mb-2">Role/Position</label>
+                      <input
+                        type="text"
+                        name="role"
+                        value={formData.role}
+                        onChange={handleInputChange}
+                        className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 bg-white/80 backdrop-blur-sm"
+                        placeholder="e.g., Frontend Developer"
                       />
                     </div>
                     <div className="md:col-span-2">
@@ -693,73 +672,110 @@ function ClientHome({ onBack, task }) {
                         name="experience"
                         value={formData.experience}
                         onChange={handleInputChange}
-                        placeholder="Describe your work experience..."
                         rows={3}
-                        className="w-full bg-white border-2 border-gray-200 rounded-xl px-4 py-3 text-gray-800 placeholder-gray-400 focus:outline-none focus:border-blue-500 focus:bg-blue-50/50 transition-all duration-300 resize-none"
+                        className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 bg-white/80 backdrop-blur-sm resize-none"
+                        placeholder="Describe your work experience..."
+                      />
+                    </div>
+                    <div className="md:col-span-2">
+                      <label className="block text-sm font-semibold text-gray-700 mb-2">Address</label>
+                      <textarea
+                        name="address"
+                        value={formData.address}
+                        onChange={handleInputChange}
+                        rows={2}
+                        className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 bg-white/80 backdrop-blur-sm resize-none"
+                        placeholder="Your current address..."
                       />
                     </div>
                   </div>
                 </div>
 
-                {/* Professional Links */}
+                {/* Links Section */}
                 <div className="space-y-6">
                   <h3 className="text-xl font-bold text-gray-800 border-b border-gray-200 pb-2">Professional Links</h3>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                     <div>
                       <label className="block text-sm font-semibold text-gray-700 mb-2">LinkedIn Profile</label>
                       <input
+                        type="url"
                         name="linkedin"
                         value={formData.linkedin}
                         onChange={handleInputChange}
-                        placeholder="LinkedIn URL (optional)"
-                        className="w-full bg-white border-2 border-gray-200 rounded-xl px-4 py-3 text-gray-800 placeholder-gray-400 focus:outline-none focus:border-blue-500 focus:bg-blue-50/50 transition-all duration-300"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-semibold text-gray-700 mb-2">GitHub Profile</label>
-                      <input
-                        name="github"
-                        value={formData.github}
-                        onChange={handleInputChange}
-                        placeholder="GitHub URL (optional)"
-                        className="w-full bg-white border-2 border-gray-200 rounded-xl px-4 py-3 text-gray-800 placeholder-gray-400 focus:outline-none focus:border-blue-500 focus:bg-blue-50/50 transition-all duration-300"
+                        className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 bg-white/80 backdrop-blur-sm"
+                        placeholder="https://linkedin.com/in/yourprofile"
                       />
                     </div>
                     <div>
                       <label className="block text-sm font-semibold text-gray-700 mb-2">Portfolio Website</label>
                       <input
+                        type="url"
                         name="portfolio"
                         value={formData.portfolio}
                         onChange={handleInputChange}
-                        placeholder="Portfolio URL (optional)"
-                        className="w-full bg-white border-2 border-gray-200 rounded-xl px-4 py-3 text-gray-800 placeholder-gray-400 focus:outline-none focus:border-blue-500 focus:bg-blue-50/50 transition-all duration-300"
+                        className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 bg-white/80 backdrop-blur-sm"
+                        placeholder="https://yourportfolio.com"
                       />
                     </div>
                     <div>
-                      <label className="block text-sm font-semibold text-gray-700 mb-2">Desired Role</label>
+                      <label className="block text-sm font-semibold text-gray-700 mb-2">GitHub Profile</label>
                       <input
-                        name="role"
-                        value={formData.role}
+                        type="url"
+                        name="github"
+                        value={formData.github}
                         onChange={handleInputChange}
-                        placeholder="e.g., Frontend Developer"
-                        className="w-full bg-white border-2 border-gray-200 rounded-xl px-4 py-3 text-gray-800 placeholder-gray-400 focus:outline-none focus:border-blue-500 focus:bg-blue-50/50 transition-all duration-300"
+                        className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 bg-white/80 backdrop-blur-sm"
+                        placeholder="https://github.com/yourusername"
                       />
                     </div>
                   </div>
                 </div>
 
+                {/* Skills Section */}
+                <div className="space-y-4">
+                  <label className="block text-sm font-semibold text-gray-700">Skills</label>
+                  <input
+                    type="text"
+                    value={formData.skills.join(", ")}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        skills: e.target.value
+                          .split(",")
+                          .map((skill) => skill.trim())
+                          .filter(Boolean),
+                      })
+                    }
+                    className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 bg-white/80 backdrop-blur-sm"
+                    placeholder="e.g., JavaScript, React, Node.js, Python"
+                  />
+                  <p className="text-sm text-gray-500">Separate skills with commas</p>
+                  {formData.skills.length > 0 && (
+                    <div className="flex flex-wrap gap-2 mt-2">
+                      {formData.skills.map((skill, index) => (
+                        <span
+                          key={index}
+                          className="px-3 py-1 bg-blue-100 text-blue-800 text-sm rounded-full border border-blue-200"
+                        >
+                          {skill}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
                 {/* Error Display */}
                 {error && (
-                  <div className="p-4 bg-red-50 border border-red-200 rounded-xl text-red-600 text-sm">
-                    <div className="flex items-center space-x-2">
-                      <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                  <div className="bg-red-50 border border-red-200 rounded-xl p-4">
+                    <div className="flex items-center space-x-3">
+                      <svg className="w-5 h-5 text-red-500" fill="currentColor" viewBox="0 0 20 20">
                         <path
                           fillRule="evenodd"
-                          d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z"
+                          d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z"
                           clipRule="evenodd"
                         />
                       </svg>
-                      <span>{error}</span>
+                      <p className="text-red-800 font-medium">{error}</p>
                     </div>
                   </div>
                 )}
@@ -767,64 +783,34 @@ function ClientHome({ onBack, task }) {
                 {/* Action Buttons */}
                 <div className="flex flex-col sm:flex-row gap-4 pt-6">
                   <button
-                    type="submit"
-                    disabled={
-                      (!hasApplication &&
-                        (!formData.name ||
-                          !formData.email ||
-                          !formData.phone ||
-                          !formData.institution ||
-                          !formData.education ||
-                          !resumeFile)) ||
-                      isLoading
-                    }
-                    className="flex-1 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 disabled:from-gray-400 disabled:to-gray-500 disabled:opacity-50 text-white py-4 px-6 rounded-xl font-semibold text-lg shadow-lg hover:shadow-xl transform hover:-translate-y-1 disabled:transform-none transition-all duration-300 disabled:cursor-not-allowed relative overflow-hidden group"
+                    type="button"
+                    onClick={onBack}
+                    className="px-6 py-3 border border-gray-300 text-gray-700 rounded-xl hover:bg-gray-50 transition-all duration-200 font-medium"
                   >
-                    <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent transform -skew-x-12 translate-x-full group-hover:translate-x-[-100%] transition-transform duration-700"></div>
-                    <div className="relative flex items-center justify-center space-x-3">
-                      {isLoading ? (
-                        <>
-                          <svg className="w-5 h-5 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              strokeWidth={2}
-                              d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-                            />
-                          </svg>
-                          <span>{hasApplication ? "Updating Profile..." : "Submitting Application..."}</span>
-                        </>
-                      ) : (
-                        <>
-                          <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-                            <path
-                              fillRule="evenodd"
-                              d="M10.293 3.293a1 1 0 011.414 0l6 6a1 1 0 010 1.414l-6 6a1 1 0 01-1.414-1.414L14.586 11H3a1 1 0 110-2h11.586l-4.293-4.293a1 1 0 010-1.414z"
-                              clipRule="evenodd"
-                            />
-                          </svg>
-                          <span>{hasApplication ? "Update Profile" : "Submit Application"}</span>
-                        </>
-                      )}
-                    </div>
+                    Back to Home
                   </button>
-
-                  {hasApplication && (
-                    <button
-                      type="button"
-                      onClick={() => setStage("dashboard")}
-                      className="flex-1 sm:flex-none bg-gray-100 hover:bg-gray-200 text-gray-700 py-4 px-6 rounded-xl font-semibold text-lg shadow-lg hover:shadow-xl transition-all duration-300"
-                    >
-                      Back to Dashboard
-                    </button>
-                  )}
-
                   <button
                     type="button"
                     onClick={handleLogout}
-                    className="flex-1 sm:flex-none text-gray-500 hover:text-gray-700 underline text-center py-2 font-medium transition-colors duration-300"
+                    className="px-6 py-3 border border-red-300 text-red-700 rounded-xl hover:bg-red-50 transition-all duration-200 font-medium"
                   >
-                    Sign Out
+                    Logout
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isLoading || (!resumeFile && !hasApplication)}
+                    className="flex-1 bg-gradient-to-r from-blue-600 to-indigo-600 text-white py-3 px-8 rounded-xl hover:from-blue-700 hover:to-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 font-semibold shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
+                  >
+                    {isLoading ? (
+                      <div className="flex items-center justify-center space-x-2">
+                        <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                        <span>{hasApplication ? "Updating..." : "Submitting..."}</span>
+                      </div>
+                    ) : hasApplication ? (
+                      "Update Profile"
+                    ) : (
+                      "Submit Application"
+                    )}
                   </button>
                 </div>
               </form>
