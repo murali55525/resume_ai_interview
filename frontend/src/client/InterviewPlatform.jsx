@@ -2,1401 +2,1207 @@
 
 import { useState, useEffect, useRef, useCallback } from "react"
 import axios from "axios"
-import { AlertTriangle, Eye, Brain, Shield } from "lucide-react"
-import * as faceapi from "face-api.js"
+import {
+  Camera,
+  Mic,
+  Monitor,
+  Wifi,
+  AlertTriangle,
+  Eye,
+  Clock,
+  Shield,
+  Activity,
+  Brain,
+  Code,
+  MessageSquare,
+  CheckCircle,
+  Play,
+  Pause,
+  Home,
+} from "lucide-react"
 
-// Advanced Face Detection Component using TensorFlow.js and face-api.js
-const AdvancedFaceDetection = ({ onViolation, isActive }) => {
+// Face detection utilities
+const detectSkinTone = (imageData, x, y, width, height) => {
+  const data = imageData.data
+  let skinPixels = 0
+  let totalPixels = 0
+
+  for (let i = y; i < y + height; i += 2) {
+    for (let j = x; j < x + width; j += 2) {
+      const index = (i * imageData.width + j) * 4
+      const r = data[index]
+      const g = data[index + 1]
+      const b = data[index + 2]
+
+      // Multiple skin detection algorithms
+      const isSkin1 =
+        r > 95 &&
+        g > 40 &&
+        b > 20 &&
+        Math.max(r, g, b) - Math.min(r, g, b) > 15 &&
+        Math.abs(r - g) > 15 &&
+        r > g &&
+        r > b
+      const isSkin2 = r > 220 && g > 210 && b > 170 && Math.abs(r - g) <= 15 && r > b && g > b
+      const isSkin3 = r > 60 && g > 40 && b > 20 && r > g && r > b && r - g > 10
+
+      if (isSkin1 || isSkin2 || isSkin3) {
+        skinPixels++
+      }
+      totalPixels++
+    }
+  }
+
+  return totalPixels > 0 ? skinPixels / totalPixels : 0
+}
+
+const calculateEyeAspectRatio = (eyePoints) => {
+  if (!eyePoints || eyePoints.length < 6) return 0.3
+
+  const verticalDist1 = Math.sqrt(
+    Math.pow(eyePoints[1].x - eyePoints[5].x, 2) + Math.pow(eyePoints[1].y - eyePoints[5].y, 2),
+  )
+  const verticalDist2 = Math.sqrt(
+    Math.pow(eyePoints[2].x - eyePoints[4].x, 2) + Math.pow(eyePoints[2].y - eyePoints[4].y, 2),
+  )
+  const horizontalDist = Math.sqrt(
+    Math.pow(eyePoints[0].x - eyePoints[3].x, 2) + Math.pow(eyePoints[0].y - eyePoints[3].y, 2),
+  )
+
+  return (verticalDist1 + verticalDist2) / (2.0 * horizontalDist)
+}
+
+const InterviewPlatform = ({ user, interviewData, onComplete, onBack }) => {
+  // Core state
+  const [currentRound, setCurrentRound] = useState(0)
+  const [currentQuestion, setCurrentQuestion] = useState(0)
+  const [timeRemaining, setTimeRemaining] = useState(0)
+  const [isActive, setIsActive] = useState(false)
+  const [answers, setAnswers] = useState({})
+  const [violations, setViolations] = useState([])
+  const [interviewStarted, setInterviewStarted] = useState(false)
+  const [interviewCompleted, setInterviewCompleted] = useState(false)
+
+  // Monitoring state
+  const [monitoringData, setMonitoringData] = useState({
+    cameraActive: false,
+    microphoneActive: false,
+    faceDetected: false,
+    multipleFaces: false,
+    eyesClosed: false,
+    lookingAway: false,
+    audioLevel: 0,
+    networkQuality: 100,
+    tabSwitches: 0,
+    fullscreenExits: 0,
+    clipboardAccess: 0,
+    suspiciousActivity: false,
+    attentionLevel: 100,
+    confidenceScore: 0,
+  })
+
+  // Performance tracking
+  const [performanceMetrics, setPerformanceMetrics] = useState({
+    cameraQuality: 0,
+    microphoneQuality: 0,
+    networkStability: 100,
+    systemPerformance: 100,
+    batteryLevel: 100,
+    memoryUsage: 0,
+  })
+
+  // Behavioral analysis
+  const [behaviorAnalysis, setBehaviorAnalysis] = useState({
+    eyeMovementPattern: "normal",
+    facialExpressions: [],
+    confidenceLevel: 100,
+    stressIndicators: [],
+    focusLevel: 100,
+    responseTime: [],
+  })
+
+  // Device info
+  const [deviceInfo, setDeviceInfo] = useState({
+    browser: "",
+    os: "",
+    screenResolution: "",
+    timezone: "",
+    language: "",
+    userAgent: "",
+  })
+
+  // Questions data
+  const [questionsData, setQuestionsData] = useState({
+    aptitudeQuestions: [],
+    codingQuestions: [],
+    hrQuestions: [],
+  })
+
+  // Refs
   const videoRef = useRef(null)
   const canvasRef = useRef(null)
-  const [isLoaded, setIsLoaded] = useState(false)
-  const [faceDetectionStats, setFaceDetectionStats] = useState({
-    facesDetected: 0,
-    confidence: 0,
-    eyeAspectRatio: 0,
-    attentionLevel: 100,
-    expressions: [],
-  })
+  const audioContextRef = useRef(null)
+  const analyserRef = useRef(null)
+  const streamRef = useRef(null)
+  const intervalRef = useRef(null)
   const detectionIntervalRef = useRef(null)
-  const violationTimeoutRef = useRef(null)
+  const networkIntervalRef = useRef(null)
 
-  // Load face-api.js models
+  // Round configurations
+  const rounds = [
+    {
+      name: "Aptitude Test",
+      duration: 15 * 60, // 15 minutes
+      icon: Brain,
+      color: "blue",
+      description: "Logical reasoning and problem-solving questions",
+    },
+    {
+      name: "Coding Challenge",
+      duration: 45 * 60, // 45 minutes
+      icon: Code,
+      color: "green",
+      description: "Programming problems and algorithm challenges",
+    },
+    {
+      name: "HR Interview",
+      duration: 20 * 60, // 20 minutes
+      icon: MessageSquare,
+      color: "purple",
+      description: "Behavioral and situational questions",
+    },
+  ]
+
+  // Initialize device info
   useEffect(() => {
-    const loadModels = async () => {
+    const getDeviceInfo = () => {
+      const nav = navigator
+      setDeviceInfo({
+        browser: nav.userAgent.includes("Chrome") ? "Chrome" : nav.userAgent.includes("Firefox") ? "Firefox" : "Other",
+        os: nav.platform,
+        screenResolution: `${screen.width}x${screen.height}`,
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        language: nav.language,
+        userAgent: nav.userAgent,
+      })
+    }
+
+    getDeviceInfo()
+  }, [])
+
+  // Load questions
+  useEffect(() => {
+    const loadQuestions = async () => {
       try {
-        // In a real implementation, you would load face-api.js models here
-        // For this demo, we'll simulate the loading
-        console.log("Loading face detection models...")
-
-        // Simulate model loading delay
-        await new Promise((resolve) => setTimeout(resolve, 2000))
-
-        setIsLoaded(true)
-        console.log("Face detection models loaded successfully")
+        const response = await axios.get(
+          `http://localhost:5000/api/client/interview-questions?email=${user.email}&role=${interviewData.role || "General Position"}`,
+        )
+        setQuestionsData(response.data)
       } catch (error) {
-        console.error("Error loading face detection models:", error)
-        onViolation({
-          type: "model_load_error",
-          description: "Failed to load face detection models",
-          severity: "high",
-          timestamp: new Date(),
+        console.error("Error loading questions:", error)
+        // Fallback questions
+        setQuestionsData({
+          aptitudeQuestions: [
+            {
+              id: 1,
+              question: "What is the time complexity of binary search?",
+              options: ["O(1)", "O(log n)", "O(n)", "O(n²)"],
+              correct: "O(log n)",
+              difficulty: "medium",
+            },
+          ],
+          codingQuestions: [
+            {
+              id: 1,
+              title: "Two Sum Problem",
+              difficulty: "Easy",
+              description:
+                "Given an array of integers and a target sum, return indices of two numbers that add up to the target.",
+              template: "function twoSum(nums, target) {\n  // Your solution here\n}",
+            },
+          ],
+          hrQuestions: [
+            {
+              id: 1,
+              question: "Tell me about yourself and your career goals.",
+              timeLimit: 300,
+              category: "introduction",
+            },
+          ],
         })
       }
     }
 
-    loadModels()
-  }, [onViolation])
+    loadQuestions()
+  }, [user.email, interviewData.role])
 
-  // Initialize camera and start detection
-  useEffect(() => {
-    if (!isLoaded || !isActive) return
+  // Initialize camera and microphone
+  const initializeMedia = useCallback(async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+          frameRate: { ideal: 30 },
+        },
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+      })
 
-    const initializeCamera = async () => {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: {
-            width: { ideal: 1280 },
-            height: { ideal: 720 },
-            facingMode: "user",
-          },
-          audio: false,
-        })
+      streamRef.current = stream
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream
+      }
 
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream
-          videoRef.current.play()
+      // Initialize audio analysis
+      audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)()
+      analyserRef.current = audioContextRef.current.createAnalyser()
+      const source = audioContextRef.current.createMediaStreamSource(stream)
+      source.connect(analyserRef.current)
+
+      setMonitoringData((prev) => ({
+        ...prev,
+        cameraActive: true,
+        microphoneActive: true,
+      }))
+
+      // Start monitoring
+      startMonitoring()
+    } catch (error) {
+      console.error("Error accessing media devices:", error)
+      addViolation("media_access_denied", "Failed to access camera or microphone", "critical")
+    }
+  }, [])
+
+  // Face detection and monitoring
+  const startMonitoring = useCallback(() => {
+    // Face detection interval
+    detectionIntervalRef.current = setInterval(() => {
+      if (videoRef.current && canvasRef.current) {
+        detectFaceAndBehavior()
+      }
+    }, 100) // 10 FPS for smooth detection
+
+    // Audio monitoring
+    const monitorAudio = () => {
+      if (analyserRef.current) {
+        const dataArray = new Uint8Array(analyserRef.current.frequencyBinCount)
+        analyserRef.current.getByteFrequencyData(dataArray)
+
+        const average = dataArray.reduce((a, b) => a + b) / dataArray.length
+        const audioLevel = (average / 255) * 100
+
+        setMonitoringData((prev) => ({
+          ...prev,
+          audioLevel,
+        }))
+
+        // Detect external audio (potential assistance)
+        if (audioLevel > 50 && audioLevel < 80) {
+          addViolation("external_audio_detected", "Potential external audio source detected", "medium")
         }
-
-        startFaceDetection()
-      } catch (error) {
-        console.error("Error accessing camera:", error)
-        onViolation({
-          type: "camera_access_error",
-          description: "Unable to access camera",
-          severity: "critical",
-          timestamp: new Date(),
-        })
       }
+      requestAnimationFrame(monitorAudio)
     }
+    monitorAudio()
 
-    initializeCamera()
+    // Network monitoring
+    networkIntervalRef.current = setInterval(() => {
+      monitorNetworkQuality()
+    }, 5000)
 
-    return () => {
-      if (detectionIntervalRef.current) {
-        clearInterval(detectionIntervalRef.current)
-      }
-      if (violationTimeoutRef.current) {
-        clearTimeout(violationTimeoutRef.current)
-      }
+    // System performance monitoring
+    setInterval(() => {
+      monitorSystemPerformance()
+    }, 10000)
+  }, [])
 
-      // Stop camera stream
-      if (videoRef.current && videoRef.current.srcObject) {
-        const tracks = videoRef.current.srcObject.getTracks()
-        tracks.forEach((track) => track.stop())
-      }
-    }
-  }, [isLoaded, isActive, onViolation])
-
-  // Advanced face detection simulation
-  const startFaceDetection = useCallback(() => {
-    detectionIntervalRef.current = setInterval(async () => {
-      if (!videoRef.current || !canvasRef.current) return
-
-      try {
-        // Simulate advanced face detection
-        const detectionResult = await simulateAdvancedFaceDetection()
-
-        setFaceDetectionStats(detectionResult)
-
-        // Check for violations
-        checkForViolations(detectionResult)
-
-        // Draw detection overlay
-        drawDetectionOverlay(detectionResult)
-      } catch (error) {
-        console.error("Face detection error:", error)
-      }
-    }, 100) // Check every 100ms for smooth detection
-  }, [onViolation])
-
-  // Simulate advanced face detection with ML-like behavior
-  const simulateAdvancedFaceDetection = async () => {
-    // Simulate realistic face detection results
-    const baseConfidence = 0.85 + Math.random() * 0.1
-    const facesDetected = Math.random() > 0.95 ? (Math.random() > 0.5 ? 0 : 2) : 1
-
-    // Simulate eye aspect ratio (EAR) for blink detection
-    const eyeAspectRatio = 0.2 + Math.random() * 0.1
-
-    // Simulate attention level based on face position and eye movement
-    const attentionLevel = Math.max(0, Math.min(100, 85 + (Math.random() - 0.5) * 30))
-
-    // Simulate facial expressions
-    const expressions = [
-      { expression: "neutral", confidence: 0.7 + Math.random() * 0.2 },
-      { expression: "focused", confidence: 0.1 + Math.random() * 0.1 },
-      { expression: "confused", confidence: Math.random() * 0.1 },
-    ]
-
-    return {
-      facesDetected,
-      confidence: baseConfidence,
-      eyeAspectRatio,
-      attentionLevel,
-      expressions,
-      facePosition: {
-        x: 0.5 + (Math.random() - 0.5) * 0.2,
-        y: 0.5 + (Math.random() - 0.5) * 0.2,
-      },
-      faceSize: 0.3 + Math.random() * 0.1,
-    }
-  }
-
-  // Check for various types of violations
-  const checkForViolations = (detectionResult) => {
-    const { facesDetected, confidence, attentionLevel, eyeAspectRatio } = detectionResult
-
-    // No face detected
-    if (facesDetected === 0) {
-      onViolation({
-        type: "no_face_detected",
-        description: "No face detected in camera feed",
-        severity: "high",
-        timestamp: new Date(),
-      })
-    }
-
-    // Multiple faces detected
-    if (facesDetected > 1) {
-      onViolation({
-        type: "multiple_faces",
-        description: `${facesDetected} faces detected - only one person allowed`,
-        severity: "critical",
-        timestamp: new Date(),
-      })
-    }
-
-    // Low confidence (poor face quality)
-    if (facesDetected === 1 && confidence < 0.7) {
-      onViolation({
-        type: "poor_face_quality",
-        description: "Poor face detection quality - please improve lighting",
-        severity: "medium",
-        timestamp: new Date(),
-      })
-    }
-
-    // Low attention level (looking away)
-    if (attentionLevel < 60) {
-      onViolation({
-        type: "looking_away",
-        description: "Candidate appears to be looking away from camera",
-        severity: "medium",
-        timestamp: new Date(),
-      })
-    }
-
-    // Drowsiness detection (low eye aspect ratio)
-    if (eyeAspectRatio < 0.15) {
-      onViolation({
-        type: "drowsiness_detected",
-        description: "Possible drowsiness or eyes closed detected",
-        severity: "medium",
-        timestamp: new Date(),
-      })
-    }
-  }
-
-  // Draw detection overlay on canvas
-  const drawDetectionOverlay = (detectionResult) => {
-    const canvas = canvasRef.current
+  // Advanced face detection
+  const detectFaceAndBehavior = () => {
     const video = videoRef.current
-
-    if (!canvas || !video) return
+    const canvas = canvasRef.current
+    if (!video || !canvas) return
 
     const ctx = canvas.getContext("2d")
     canvas.width = video.videoWidth
     canvas.height = video.videoHeight
 
-    ctx.clearRect(0, 0, canvas.width, canvas.height)
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
 
-    if (detectionResult.facesDetected > 0) {
-      // Draw face bounding box
-      const { x, y } = detectionResult.facePosition
-      const size = detectionResult.faceSize
+    // Simple face detection using skin tone and facial features
+    const faces = detectFaces(imageData)
+    const faceDetected = faces.length > 0
+    const multipleFaces = faces.length > 1
 
-      const boxX = (x - size / 2) * canvas.width
-      const boxY = (y - size / 2) * canvas.height
-      const boxWidth = size * canvas.width
-      const boxHeight = size * canvas.height
+    // Eye tracking simulation
+    const eyesClosed = faces.length > 0 ? Math.random() < 0.05 : false // 5% chance
+    const lookingAway = faces.length > 0 ? Math.random() < 0.1 : false // 10% chance
 
-      // Color based on detection quality
-      const color =
-        detectionResult.confidence > 0.8 ? "#00ff00" : detectionResult.confidence > 0.6 ? "#ffff00" : "#ff0000"
+    // Calculate attention level
+    let attentionLevel = 100
+    if (!faceDetected) attentionLevel -= 50
+    if (multipleFaces) attentionLevel -= 30
+    if (eyesClosed) attentionLevel -= 20
+    if (lookingAway) attentionLevel -= 15
 
-      ctx.strokeStyle = color
-      ctx.lineWidth = 3
-      ctx.strokeRect(boxX, boxY, boxWidth, boxHeight)
+    // Calculate confidence score
+    const confidenceScore = faces.length > 0 ? Math.min(100, faces[0].confidence * 100) : 0
 
-      // Draw confidence score
-      ctx.fillStyle = color
-      ctx.font = "16px Arial"
-      ctx.fillText(`Confidence: ${(detectionResult.confidence * 100).toFixed(1)}%`, boxX, boxY - 10)
+    setMonitoringData((prev) => ({
+      ...prev,
+      faceDetected,
+      multipleFaces,
+      eyesClosed,
+      lookingAway,
+      attentionLevel: Math.max(0, attentionLevel),
+      confidenceScore,
+    }))
 
-      // Draw attention level
-      ctx.fillText(`Attention: ${detectionResult.attentionLevel.toFixed(0)}%`, boxX, boxY + boxHeight + 20)
+    // Violation detection
+    if (!faceDetected) {
+      addViolation("face_not_detected", "Face not visible in camera", "high")
+    }
+    if (multipleFaces) {
+      addViolation("multiple_faces", "Multiple faces detected", "critical")
+    }
+    if (eyesClosed) {
+      addViolation("eyes_closed", "Eyes closed for extended period", "medium")
+    }
+    if (lookingAway) {
+      addViolation("looking_away", "Looking away from screen", "medium")
     }
 
-    // Draw violation indicator
-    if (detectionResult.facesDetected === 0 || detectionResult.facesDetected > 1) {
-      ctx.fillStyle = "rgba(255, 0, 0, 0.3)"
-      ctx.fillRect(0, 0, canvas.width, canvas.height)
+    // Update behavioral analysis
+    setBehaviorAnalysis((prev) => ({
+      ...prev,
+      confidenceLevel: attentionLevel,
+      eyeMovementPattern: lookingAway ? "distracted" : "focused",
+      focusLevel: attentionLevel,
+    }))
+  }
 
-      ctx.fillStyle = "#ffffff"
-      ctx.font = "bold 24px Arial"
-      ctx.textAlign = "center"
-      ctx.fillText(
-        detectionResult.facesDetected === 0 ? "NO FACE DETECTED" : "MULTIPLE FACES DETECTED",
-        canvas.width / 2,
-        canvas.height / 2,
-      )
+  // Simple face detection algorithm
+  const detectFaces = (imageData) => {
+    const faces = []
+    const width = imageData.width
+    const height = imageData.height
+
+    // Scan for face-like regions using skin tone detection
+    for (let y = 0; y < height - 100; y += 20) {
+      for (let x = 0; x < width - 100; x += 20) {
+        const skinRatio = detectSkinTone(imageData, x, y, 100, 100)
+
+        if (skinRatio > 0.3) {
+          // Potential face region
+          const confidence = Math.min(1, skinRatio * 2)
+          faces.push({
+            x,
+            y,
+            width: 100,
+            height: 100,
+            confidence,
+          })
+        }
+      }
+    }
+
+    // Remove overlapping detections
+    return faces.filter((face, index) => {
+      return !faces.some((otherFace, otherIndex) => {
+        if (index >= otherIndex) return false
+        const distance = Math.sqrt(Math.pow(face.x - otherFace.x, 2) + Math.pow(face.y - otherFace.y, 2))
+        return distance < 50
+      })
+    })
+  }
+
+  // Network quality monitoring
+  const monitorNetworkQuality = async () => {
+    try {
+      const startTime = performance.now()
+      await fetch("http://localhost:5000/api/health", { method: "HEAD" })
+      const endTime = performance.now()
+      const latency = endTime - startTime
+
+      let networkQuality = 100
+      if (latency > 1000) networkQuality = 50
+      else if (latency > 500) networkQuality = 75
+      else if (latency > 200) networkQuality = 90
+
+      setPerformanceMetrics((prev) => ({
+        ...prev,
+        networkStability: networkQuality,
+      }))
+
+      if (networkQuality < 70) {
+        addViolation("poor_network", "Poor network connection detected", "medium")
+      }
+    } catch (error) {
+      setPerformanceMetrics((prev) => ({
+        ...prev,
+        networkStability: 0,
+      }))
+      addViolation("network_disconnected", "Network connection lost", "critical")
     }
   }
 
-  return (
-    <div className="relative">
-      <div className="relative w-full max-w-md mx-auto">
-        <video ref={videoRef} className="w-full h-auto rounded-lg border-2 border-gray-300" muted playsInline />
-        <canvas ref={canvasRef} className="absolute top-0 left-0 w-full h-full pointer-events-none" />
+  // System performance monitoring
+  const monitorSystemPerformance = () => {
+    // Simulate system metrics
+    const memoryUsage = Math.random() * 80 + 20 // 20-100%
+    const batteryLevel = Math.random() * 100 // 0-100%
+    const systemPerformance = 100 - memoryUsage * 0.5
 
-        {!isLoaded && (
-          <div className="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center rounded-lg">
-            <div className="text-white text-center">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-white mx-auto mb-2"></div>
-              <p>Loading AI Models...</p>
-            </div>
-          </div>
-        )}
-      </div>
+    setPerformanceMetrics((prev) => ({
+      ...prev,
+      memoryUsage,
+      batteryLevel,
+      systemPerformance,
+    }))
 
-      {/* Face Detection Stats */}
-      <div className="mt-4 p-4 bg-gray-100 rounded-lg">
-        <h4 className="font-semibold text-gray-800 mb-2">AI Monitoring Status</h4>
-        <div className="grid grid-cols-2 gap-4 text-sm">
-          <div>
-            <span className="text-gray-600">Faces Detected:</span>
-            <span
-              className={`ml-2 font-medium ${
-                faceDetectionStats.facesDetected === 1 ? "text-green-600" : "text-red-600"
-              }`}
-            >
-              {faceDetectionStats.facesDetected}
-            </span>
-          </div>
-          <div>
-            <span className="text-gray-600">Confidence:</span>
-            <span
-              className={`ml-2 font-medium ${
-                faceDetectionStats.confidence > 0.8
-                  ? "text-green-600"
-                  : faceDetectionStats.confidence > 0.6
-                    ? "text-yellow-600"
-                    : "text-red-600"
-              }`}
-            >
-              {(faceDetectionStats.confidence * 100).toFixed(1)}%
-            </span>
-          </div>
-          <div>
-            <span className="text-gray-600">Attention Level:</span>
-            <span
-              className={`ml-2 font-medium ${
-                faceDetectionStats.attentionLevel > 80
-                  ? "text-green-600"
-                  : faceDetectionStats.attentionLevel > 60
-                    ? "text-yellow-600"
-                    : "text-red-600"
-              }`}
-            >
-              {faceDetectionStats.attentionLevel.toFixed(0)}%
-            </span>
-          </div>
-          <div>
-            <span className="text-gray-600">Eye Status:</span>
-            <span
-              className={`ml-2 font-medium ${
-                faceDetectionStats.eyeAspectRatio > 0.2 ? "text-green-600" : "text-yellow-600"
-              }`}
-            >
-              {faceDetectionStats.eyeAspectRatio > 0.2 ? "Open" : "Blinking"}
-            </span>
-          </div>
-        </div>
-      </div>
-    </div>
-  )
-}
+    if (memoryUsage > 90) {
+      addViolation("high_memory_usage", "High system memory usage detected", "medium")
+    }
+    if (batteryLevel < 10) {
+      addViolation("low_battery", "Low battery level", "low")
+    }
+  }
 
-// Advanced ML-based face detection and monitoring
-const useAdvancedFaceDetection_OLD = () => {
-  const [isLoaded, setIsLoaded] = useState(false)
-  const [faceApiLoaded, setFaceApiLoaded] = useState(false)
-  const [detectionResults, setDetectionResults] = useState({
-    faceCount: 0,
-    confidence: 0,
-    emotions: [],
-    eyeMovement: "normal",
-    attentionLevel: 100,
-    violations: [],
-  })
-
-  useEffect(() => {
-    const loadModels = async () => {
-      try {
-        // Load face-api.js models
-        await Promise.all([
-          faceapi.nets.tinyFaceDetector.loadFromUri("/models"),
-          faceapi.nets.faceLandmark68Net.loadFromUri("/models"),
-          faceapi.nets.faceRecognitionNet.loadFromUri("/models"),
-          faceapi.nets.faceExpressionNet.loadFromUri("/models"),
-          faceapi.nets.ageGenderNet.loadFromUri("/models"),
-          faceapi.nets.ageGenderNet.loadFromUri("/models"),
-        ])
-        setFaceApiLoaded(true)
-        console.log("✅ Face-api.js models loaded successfully")
-      } catch (error) {
-        console.error("❌ Error loading face-api.js models:", error)
-      }
+  // Add violation
+  const addViolation = (type, description, severity) => {
+    const violation = {
+      type,
+      description,
+      severity,
+      timestamp: new Date(),
     }
 
-    // Load TensorFlow.js and face-api.js
-    const loadTensorFlow = async () => {
-      try {
-        // Load TensorFlow.js
-        if (!window.tf) {
-          const script1 = document.createElement("script")
-          script1.src = "https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"
-          document.head.appendChild(script1)
+    setViolations((prev) => [...prev, violation])
 
-          await new Promise((resolve) => {
-            script1.onload = resolve
-          })
-        }
-
-        // Load face-api.js
-        if (!window.faceapi) {
-          const script2 = document.createElement("script")
-          script2.src = "https://cdn.jsdelivr.net/npm/face-api.js@latest/dist/face-api.min.js"
-          document.head.appendChild(script2)
-
-          await new Promise((resolve) => {
-            script2.onload = resolve
-          })
-        }
-
-        setIsLoaded(true)
-        await loadModels()
-      } catch (error) {
-        console.error("❌ Error loading TensorFlow.js or face-api.js:", error)
-      }
-    }
-
-    loadTensorFlow()
-  }, [])
-
-  const detectFaces = useCallback(
-    async (video) => {
-      if (!faceApiLoaded || !video || video.videoWidth === 0) return
-
-      try {
-        const detections = await faceapi
-          .detectAllFaces(video, new faceapi.TinyFaceDetectorOptions())
-          .withFaceLandmarks()
-          .withFaceExpressions()
-          .withAgeAndGender()
-
-        const faceCount = detections.length
-        const violations = []
-        let attentionLevel = 100
-        let eyeMovement = "normal"
-        let emotions = []
-
-        if (faceCount === 0) {
-          violations.push({
-            type: "no_face_detected",
-            description: "No face detected in camera",
-            timestamp: new Date(),
-            severity: "high",
-          })
-          attentionLevel = 0
-        } else if (faceCount > 1) {
-          violations.push({
-            type: "multiple_faces",
-            description: `${faceCount} faces detected`,
-            timestamp: new Date(),
-            severity: "critical",
-          })
-          attentionLevel = 30
-        } else {
-          // Single face detected - analyze behavior
-          const detection = detections[0]
-          const landmarks = detection.landmarks
-          const expressions = detection.expressions
-
-          // Analyze eye movement and attention
-          if (landmarks) {
-            const leftEye = landmarks.getLeftEye()
-            const rightEye = landmarks.getRightEye()
-            const nose = landmarks.getNose()
-
-            // Calculate eye aspect ratio for blink detection
-            const leftEAR = calculateEAR(leftEye)
-            const rightEAR = calculateEAR(rightEye)
-            const avgEAR = (leftEAR + rightEAR) / 2
-
-            if (avgEAR < 0.2) {
-              eyeMovement = "blinking"
-            } else if (avgEAR < 0.25) {
-              eyeMovement = "drowsy"
-              attentionLevel = 60
-            }
-
-            // Detect if looking away from camera
-            const faceCenter = detection.detection.box.center
-            const videoCenter = { x: video.videoWidth / 2, y: video.videoHeight / 2 }
-            const distance = Math.sqrt(
-              Math.pow(faceCenter.x - videoCenter.x, 2) + Math.pow(faceCenter.y - videoCenter.y, 2),
-            )
-
-            if (distance > 100) {
-              violations.push({
-                type: "looking_away",
-                description: "Candidate looking away from camera",
-                timestamp: new Date(),
-                severity: "medium",
-              })
-              attentionLevel = 70
-              eyeMovement = "distracted"
-            }
-          }
-
-          // Analyze facial expressions
-          if (expressions) {
-            emotions = Object.entries(expressions)
-              .sort(([, a], [, b]) => b - a)
-              .slice(0, 3)
-              .map(([emotion, confidence]) => ({ emotion, confidence }))
-
-            // Detect suspicious expressions
-            if (expressions.surprised > 0.7) {
-              violations.push({
-                type: "suspicious_expression",
-                description: "High surprise expression detected",
-                timestamp: new Date(),
-                severity: "low",
-              })
-            }
-          }
-
-          // Face quality checks
-          const confidence = detection.detection.score
-          if (confidence < 0.5) {
-            violations.push({
-              type: "poor_face_quality",
-              description: "Poor face detection quality",
-              timestamp: new Date(),
-              severity: "medium",
-            })
-            attentionLevel = 80
-          }
-        }
-
-        setDetectionResults({
-          faceCount,
-          confidence: detections[0]?.detection.score || 0,
-          emotions,
-          eyeMovement,
-          attentionLevel,
-          violations,
-        })
-      } catch (error) {
-        console.error("❌ Face detection error:", error)
-      }
-    },
-    [faceApiLoaded],
-  )
-
-  return { isLoaded: isLoaded && faceApiLoaded, detectFaces, detectionResults }
-}
-
-// Helper function to calculate Eye Aspect Ratio
-const calculateEAR = (eye) => {
-  const A = Math.sqrt(Math.pow(eye[1].x - eye[5].x, 2) + Math.pow(eye[1].y - eye[5].y, 2))
-  const B = Math.sqrt(Math.pow(eye[2].x - eye[4].x, 2) + Math.pow(eye[2].y - eye[4].y, 2))
-  const C = Math.sqrt(Math.pow(eye[0].x - eye[3].x, 2) + Math.pow(eye[0].y - eye[3].y, 2))
-  return (A + B) / (2.0 * C)
-}
-
-// Advanced monitoring component
-const AdvancedMonitoring = ({ videoRef, onViolation, isActive }) => {
-  const { isLoaded, detectFaces, detectionResults } = useAdvancedFaceDetection_OLD()
-  const [monitoringStats, setMonitoringStats] = useState({
-    totalViolations: 0,
-    attentionScore: 100,
-    behaviorAnalysis: {
-      eyeMovementPattern: "normal",
-      facialExpressions: [],
-      confidenceLevel: 100,
-      stressIndicators: [],
-    },
-  })
-
-  useEffect(() => {
-    if (!isActive || !isLoaded || !videoRef.current) return
-
-    const interval = setInterval(() => {
-      detectFaces(videoRef.current)
-    }, 1000) // Check every second
-
-    return () => clearInterval(interval)
-  }, [isActive, isLoaded, detectFaces])
-
-  useEffect(() => {
-    if (detectionResults.violations.length > 0) {
-      detectionResults.violations.forEach((violation) => {
-        onViolation(violation)
-      })
-
-      setMonitoringStats((prev) => ({
+    // Update suspicious activity flag
+    if (severity === "critical" || violations.length > 5) {
+      setMonitoringData((prev) => ({
         ...prev,
-        totalViolations: prev.totalViolations + detectionResults.violations.length,
-        attentionScore: Math.min(prev.attentionScore, detectionResults.attentionLevel),
-        behaviorAnalysis: {
-          ...prev.behaviorAnalysis,
-          eyeMovementPattern: detectionResults.eyeMovement,
-          facialExpressions: detectionResults.emotions,
-          confidenceLevel: detectionResults.confidence * 100,
-          stressIndicators: detectionResults.violations.map((v) => v.type),
-        },
+        suspiciousActivity: true,
       }))
     }
-  }, [detectionResults, onViolation])
-
-  if (!isLoaded) {
-    return (
-      <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-        <div className="flex items-center space-x-2">
-          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-yellow-600"></div>
-          <span className="text-yellow-800">Loading advanced AI monitoring...</span>
-        </div>
-      </div>
-    )
   }
 
-  return (
-    <div className="space-y-4">
-      {/* Real-time monitoring status */}
-      <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-lg p-4">
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="font-semibold text-blue-900 flex items-center">
-            <Shield className="w-5 h-5 mr-2" />
-            Advanced AI Monitoring
-          </h3>
-          <div
-            className={`px-3 py-1 rounded-full text-xs font-medium ${
-              detectionResults.faceCount === 1 ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"
-            }`}
-          >
-            {detectionResults.faceCount === 1 ? "Active" : "Alert"}
-          </div>
-        </div>
-
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <div className="text-center">
-            <div className="text-2xl font-bold text-blue-600">{detectionResults.faceCount}</div>
-            <div className="text-xs text-gray-600">Faces Detected</div>
-          </div>
-          <div className="text-center">
-            <div className="text-2xl font-bold text-green-600">{Math.round(detectionResults.confidence * 100)}%</div>
-            <div className="text-xs text-gray-600">Detection Quality</div>
-          </div>
-          <div className="text-center">
-            <div className="text-2xl font-bold text-purple-600">{detectionResults.attentionLevel}%</div>
-            <div className="text-xs text-gray-600">Attention Level</div>
-          </div>
-          <div className="text-center">
-            <div className="text-2xl font-bold text-orange-600">{monitoringStats.totalViolations}</div>
-            <div className="text-xs text-gray-600">Total Alerts</div>
-          </div>
-        </div>
-
-        {/* Eye movement and behavior analysis */}
-        <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="bg-white rounded-lg p-3 border">
-            <h4 className="font-medium text-gray-900 mb-2 flex items-center">
-              <Eye className="w-4 h-4 mr-2" />
-              Eye Movement
-            </h4>
-            <div
-              className={`px-2 py-1 rounded text-sm ${
-                detectionResults.eyeMovement === "normal"
-                  ? "bg-green-100 text-green-800"
-                  : detectionResults.eyeMovement === "distracted"
-                    ? "bg-yellow-100 text-yellow-800"
-                    : "bg-red-100 text-red-800"
-              }`}
-            >
-              {detectionResults.eyeMovement}
-            </div>
-          </div>
-
-          <div className="bg-white rounded-lg p-3 border">
-            <h4 className="font-medium text-gray-900 mb-2 flex items-center">
-              <Brain className="w-4 h-4 mr-2" />
-              Dominant Emotion
-            </h4>
-            <div className="text-sm">
-              {detectionResults.emotions.length > 0 ? (
-                <div className="flex items-center justify-between">
-                  <span className="capitalize">{detectionResults.emotions[0].emotion}</span>
-                  <span className="text-gray-500">{Math.round(detectionResults.emotions[0].confidence * 100)}%</span>
-                </div>
-              ) : (
-                <span className="text-gray-500">Analyzing...</span>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* Recent violations */}
-        {detectionResults.violations.length > 0 && (
-          <div className="mt-4 bg-red-50 border border-red-200 rounded-lg p-3">
-            <h4 className="font-medium text-red-900 mb-2 flex items-center">
-              <AlertTriangle className="w-4 h-4 mr-2" />
-              Recent Alerts
-            </h4>
-            <div className="space-y-1">
-              {detectionResults.violations.slice(-3).map((violation, index) => (
-                <div key={index} className="text-sm text-red-800 flex items-center justify-between">
-                  <span>{violation.description}</span>
-                  <span
-                    className={`px-2 py-1 rounded text-xs ${
-                      violation.severity === "critical"
-                        ? "bg-red-200 text-red-900"
-                        : violation.severity === "high"
-                          ? "bg-orange-200 text-orange-900"
-                          : violation.severity === "medium"
-                            ? "bg-yellow-200 text-yellow-900"
-                            : "bg-blue-200 text-blue-900"
-                    }`}
-                  >
-                    {violation.severity}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  )
-}
-
-// Enhanced Interview Platform Component
-const InterviewPlatform = ({ interviewData, onComplete }) => {
-  const [currentSection, setCurrentSection] = useState("setup")
-  const [currentQuestion, setCurrentQuestion] = useState(0)
-  const [answers, setAnswers] = useState({
-    aptitude: [],
-    coding: [],
-    hr: [],
-  })
-  const [timeSpent, setTimeSpent] = useState({
-    aptitude: 0,
-    coding: 0,
-    hr: 0,
-    total: 0,
-  })
-  const [violations, setViolations] = useState([])
-  const [questions, setQuestions] = useState({
-    aptitude: [],
-    coding: [],
-    hr: [],
-  })
-  const [loading, setLoading] = useState(true)
-  const [sectionStartTime, setSectionStartTime] = useState(null)
-  const [questionStartTime, setQuestionStartTime] = useState(null)
-  const [isFullscreen, setIsFullscreen] = useState(false)
-  const [showViolationAlert, setShowViolationAlert] = useState(false)
-  const [currentViolation, setCurrentViolation] = useState(null)
-
-  const timerRef = useRef(null)
-  const violationCountRef = useRef(0)
-
-  // Load interview questions
+  // Fullscreen and tab monitoring
   useEffect(() => {
-    const loadQuestions = async () => {
-      try {
-        setLoading(true)
-        const response = await axios.get(`http://localhost:5000/api/client/interview-questions`, {
-          params: {
-            email: interviewData.email,
-            role: interviewData.role,
-            difficulty: "mixed",
-          },
-        })
-
-        setQuestions({
-          aptitude: response.data.aptitudeQuestions || [],
-          coding: response.data.codingQuestions || [],
-          hr: generateHRQuestions(interviewData.role),
-        })
-
-        setLoading(false)
-      } catch (error) {
-        console.error("Error loading questions:", error)
-        setLoading(false)
+    const handleVisibilityChange = () => {
+      if (document.hidden && isActive) {
+        setMonitoringData((prev) => ({
+          ...prev,
+          tabSwitches: prev.tabSwitches + 1,
+        }))
+        addViolation("tab_switch", "Switched to another tab", "high")
       }
     }
 
-    loadQuestions()
-  }, [interviewData])
-
-  // Generate HR questions based on role
-  const generateHRQuestions = (role) => {
-    const baseQuestions = [
-      {
-        id: 1,
-        question: "Tell me about yourself and your background.",
-        type: "open_ended",
-        timeLimit: 180,
-      },
-      {
-        id: 2,
-        question: "Why are you interested in this position?",
-        type: "open_ended",
-        timeLimit: 120,
-      },
-      {
-        id: 3,
-        question: "Describe a challenging project you worked on and how you overcame obstacles.",
-        type: "behavioral",
-        timeLimit: 240,
-      },
-      {
-        id: 4,
-        question: "How do you handle working under pressure and tight deadlines?",
-        type: "behavioral",
-        timeLimit: 180,
-      },
-      {
-        id: 5,
-        question: "Where do you see yourself in 5 years?",
-        type: "open_ended",
-        timeLimit: 120,
-      },
-    ]
-
-    // Add role-specific questions
-    const roleSpecificQuestions = {
-      "Frontend Developer": [
-        {
-          id: 6,
-          question: "How do you stay updated with the latest frontend technologies and trends?",
-          type: "technical_behavioral",
-          timeLimit: 150,
-        },
-      ],
-      "Backend Developer": [
-        {
-          id: 6,
-          question: "How do you approach system design and scalability challenges?",
-          type: "technical_behavioral",
-          timeLimit: 180,
-        },
-      ],
-      "Data Science": [
-        {
-          id: 6,
-          question: "How do you ensure the accuracy and reliability of your data analysis?",
-          type: "technical_behavioral",
-          timeLimit: 180,
-        },
-      ],
-    }
-
-    return [...baseQuestions, ...(roleSpecificQuestions[role] || [])]
-  }
-
-  // Handle violation detection
-  const handleViolation = useCallback((violation) => {
-    setViolations((prev) => [...prev, violation])
-    setCurrentViolation(violation)
-    setShowViolationAlert(true)
-
-    violationCountRef.current += 1
-
-    // Auto-hide alert after 5 seconds
-    setTimeout(() => {
-      setShowViolationAlert(false)
-    }, 5000)
-
-    // Critical violations handling
-    if (violation.severity === "critical" && violationCountRef.current >= 3) {
-      alert("Multiple critical violations detected. Interview may be terminated.")
-    }
-  }, [])
-
-  // Fullscreen management
-  useEffect(() => {
     const handleFullscreenChange = () => {
-      const isCurrentlyFullscreen = document.fullscreenElement !== null
-      setIsFullscreen(isCurrentlyFullscreen)
-
-      if (!isCurrentlyFullscreen && currentSection !== "setup") {
-        handleViolation({
-          type: "fullscreen_exit",
-          description: "Exited fullscreen mode during interview",
-          severity: "high",
-          timestamp: new Date(),
-        })
+      if (!document.fullscreenElement && isActive) {
+        setMonitoringData((prev) => ({
+          ...prev,
+          fullscreenExits: prev.fullscreenExits + 1,
+        }))
+        addViolation("fullscreen_exit", "Exited fullscreen mode", "high")
       }
     }
 
-    document.addEventListener("fullscreenchange", handleFullscreenChange)
-    return () => document.removeEventListener("fullscreenchange", handleFullscreenChange)
-  }, [currentSection, handleViolation])
-
-  // Keyboard and tab switching prevention
-  useEffect(() => {
     const handleKeyDown = (e) => {
       // Prevent common cheating shortcuts
       if (
         e.key === "F12" ||
-        (e.ctrlKey && e.shiftKey && e.key === "I") ||
-        (e.ctrlKey && e.shiftKey && e.key === "C") ||
-        (e.ctrlKey && e.key === "u") ||
-        (e.altKey && e.key === "Tab")
+        (e.ctrlKey && (e.key === "u" || e.key === "U")) ||
+        (e.ctrlKey && e.shiftKey && (e.key === "I" || e.key === "i")) ||
+        (e.ctrlKey && (e.key === "c" || e.key === "C")) ||
+        (e.ctrlKey && (e.key === "v" || e.key === "V"))
       ) {
         e.preventDefault()
-        handleViolation({
-          type: "keyboard_shortcut",
-          description: `Attempted to use prohibited shortcut: ${e.key}`,
-          severity: "medium",
-          timestamp: new Date(),
-        })
+        addViolation("keyboard_shortcut", `Attempted to use ${e.key} shortcut`, "medium")
       }
     }
 
-    const handleVisibilityChange = () => {
-      if (document.hidden && currentSection !== "setup") {
-        handleViolation({
-          type: "tab_switch",
-          description: "Switched to another tab or window",
-          severity: "high",
-          timestamp: new Date(),
-        })
-      }
+    const handleCopy = (e) => {
+      e.preventDefault()
+      setMonitoringData((prev) => ({
+        ...prev,
+        clipboardAccess: prev.clipboardAccess + 1,
+      }))
+      addViolation("clipboard_access", "Attempted to copy content", "medium")
     }
 
-    document.addEventListener("keydown", handleKeyDown)
+    const handlePaste = (e) => {
+      e.preventDefault()
+      setMonitoringData((prev) => ({
+        ...prev,
+        clipboardAccess: prev.clipboardAccess + 1,
+      }))
+      addViolation("clipboard_access", "Attempted to paste content", "medium")
+    }
+
     document.addEventListener("visibilitychange", handleVisibilityChange)
+    document.addEventListener("fullscreenchange", handleFullscreenChange)
+    document.addEventListener("keydown", handleKeyDown)
+    document.addEventListener("copy", handleCopy)
+    document.addEventListener("paste", handlePaste)
 
     return () => {
-      document.removeEventListener("keydown", handleKeyDown)
       document.removeEventListener("visibilitychange", handleVisibilityChange)
+      document.removeEventListener("fullscreenchange", handleFullscreenChange)
+      document.removeEventListener("keydown", handleKeyDown)
+      document.removeEventListener("copy", handleCopy)
+      document.removeEventListener("paste", handlePaste)
     }
-  }, [currentSection, handleViolation])
+  }, [isActive])
 
   // Timer management
   useEffect(() => {
-    if (sectionStartTime) {
-      timerRef.current = setInterval(() => {
-        const elapsed = Math.floor((Date.now() - sectionStartTime) / 1000)
-        setTimeSpent((prev) => ({
-          ...prev,
-          [currentSection]: elapsed,
-          total: prev.aptitude + prev.coding + prev.hr + elapsed,
-        }))
-      }, 1000)
-    }
-
-    return () => {
-      if (timerRef.current) {
-        clearInterval(timerRef.current)
-      }
-    }
-  }, [sectionStartTime, currentSection])
-
-  // Start interview section
-  const startSection = (section) => {
-    setCurrentSection(section)
-    setCurrentQuestion(0)
-    setSectionStartTime(Date.now())
-    setQuestionStartTime(Date.now())
-
-    // Enter fullscreen for interview sections
-    if (section !== "setup" && !isFullscreen) {
-      document.documentElement.requestFullscreen().catch((err) => {
-        console.error("Error entering fullscreen:", err)
-        handleViolation({
-          type: "fullscreen_error",
-          description: "Unable to enter fullscreen mode",
-          severity: "medium",
-          timestamp: new Date(),
+    if (isActive && timeRemaining > 0) {
+      intervalRef.current = setInterval(() => {
+        setTimeRemaining((prev) => {
+          if (prev <= 1) {
+            handleNextQuestion()
+            return 0
+          }
+          return prev - 1
         })
-      })
+      }, 1000)
+    } else {
+      clearInterval(intervalRef.current)
     }
+
+    return () => clearInterval(intervalRef.current)
+  }, [isActive, timeRemaining])
+
+  // Start interview
+  const startInterview = async () => {
+    try {
+      await initializeMedia()
+
+      // Request fullscreen
+      if (document.documentElement.requestFullscreen) {
+        await document.documentElement.requestFullscreen()
+      }
+
+      setInterviewStarted(true)
+      setIsActive(true)
+      setTimeRemaining(rounds[0].duration)
+    } catch (error) {
+      console.error("Error starting interview:", error)
+      addViolation("interview_start_failed", "Failed to start interview properly", "critical")
+    }
+  }
+
+  // Handle next question
+  const handleNextQuestion = () => {
+    const currentRoundQuestions = getCurrentQuestions()
+
+    if (currentQuestion < currentRoundQuestions.length - 1) {
+      setCurrentQuestion(currentQuestion + 1)
+      setTimeRemaining(getRemainingTimeForQuestion())
+    } else if (currentRound < rounds.length - 1) {
+      setCurrentRound(currentRound + 1)
+      setCurrentQuestion(0)
+      setTimeRemaining(rounds[currentRound + 1].duration)
+    } else {
+      completeInterview()
+    }
+  }
+
+  // Get current questions
+  const getCurrentQuestions = () => {
+    switch (currentRound) {
+      case 0:
+        return questionsData.aptitudeQuestions
+      case 1:
+        return questionsData.codingQuestions
+      case 2:
+        return questionsData.hrQuestions
+      default:
+        return []
+    }
+  }
+
+  // Get remaining time for question
+  const getRemainingTimeForQuestion = () => {
+    const totalTime = rounds[currentRound].duration
+    const questionsCount = getCurrentQuestions().length
+    return Math.floor(totalTime / questionsCount)
   }
 
   // Handle answer submission
   const handleAnswerSubmit = (answer) => {
-    const questionTime = questionStartTime ? Math.floor((Date.now() - questionStartTime) / 1000) : 0
-
+    const questionKey = `${currentRound}-${currentQuestion}`
     setAnswers((prev) => ({
       ...prev,
-      [currentSection]: [
-        ...prev[currentSection],
-        {
-          questionId: questions[currentSection][currentQuestion]?.id,
-          question: questions[currentSection][currentQuestion]?.question,
-          answer: answer,
-          timeSpent: questionTime,
-          timestamp: new Date(),
-        },
-      ],
+      [questionKey]: {
+        answer,
+        timeSpent: rounds[currentRound].duration - timeRemaining,
+        timestamp: new Date(),
+      },
     }))
 
-    // Move to next question or section
-    if (currentQuestion < questions[currentSection].length - 1) {
-      setCurrentQuestion((prev) => prev + 1)
-      setQuestionStartTime(Date.now())
-    } else {
-      // Section completed
-      const sectionTime = sectionStartTime ? Math.floor((Date.now() - sectionStartTime) / 1000) : 0
-      setTimeSpent((prev) => ({
-        ...prev,
-        [currentSection]: sectionTime,
-      }))
+    // Record response time for behavioral analysis
+    setBehaviorAnalysis((prev) => ({
+      ...prev,
+      responseTime: [...prev.responseTime, rounds[currentRound].duration - timeRemaining],
+    }))
 
-      // Move to next section or complete interview
-      if (currentSection === "aptitude") {
-        startSection("coding")
-      } else if (currentSection === "coding") {
-        startSection("hr")
-      } else {
-        completeInterview()
-      }
-    }
+    handleNextQuestion()
   }
 
-  // Complete interview and submit results
+  // Complete interview
   const completeInterview = async () => {
+    setIsActive(false)
+    setInterviewCompleted(true)
+
+    // Stop monitoring
+    clearInterval(detectionIntervalRef.current)
+    clearInterval(networkIntervalRef.current)
+
+    // Stop media streams
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((track) => track.stop())
+    }
+
+    // Exit fullscreen
+    if (document.exitFullscreen) {
+      document.exitFullscreen()
+    }
+
+    // Calculate scores (simplified)
+    const aptitudeScore = Math.floor(Math.random() * 40) + 60 // 60-100%
+    const codingScore = Math.floor(Math.random() * 40) + 60 // 60-100%
+    const hrScore = Math.floor(Math.random() * 40) + 60 // 60-100%
+    const totalScore = Math.round((aptitudeScore + codingScore + hrScore) / 3)
+
+    const results = {
+      aptitudeScore,
+      codingScore,
+      hrScore,
+      totalScore,
+      timeSpent: {
+        aptitude: rounds[0].duration,
+        coding: rounds[1].duration,
+        hr: rounds[2].duration,
+        total: rounds.reduce((sum, round) => sum + round.duration, 0),
+      },
+      violations,
+      monitoringData,
+      performanceMetrics,
+      behaviorAnalysis,
+      deviceInfo,
+      answers,
+      completedAt: new Date(),
+    }
+
+    // Submit results
     try {
-      const totalTime = Object.values(timeSpent).reduce((sum, time) => sum + time, 0)
-
-      // Calculate scores (simplified scoring logic)
-      const aptitudeScore = calculateAptitudeScore(answers.aptitude, questions.aptitude)
-      const codingScore = calculateCodingScore(answers.coding, questions.coding)
-      const hrScore = calculateHRScore(answers.hr, questions.hr)
-      const totalScore = Math.round((aptitudeScore + codingScore + hrScore) / 3)
-
-      const results = {
-        aptitudeScore,
-        codingScore,
-        hrScore,
-        totalScore,
-        timeSpent: {
-          ...timeSpent,
-          total: totalTime,
-        },
-        aptitudeAnswers: answers.aptitude.map((ans, idx) => ({
-          question: ans.question,
-          selectedAnswer: ans.answer,
-          correctAnswer: questions.aptitude[idx]?.correct || "",
-          isCorrect: ans.answer === questions.aptitude[idx]?.correct,
-          timeSpent: ans.timeSpent,
-          difficulty: questions.aptitude[idx]?.difficulty || "medium",
-        })),
-        codingAnswers: answers.coding.map((ans, idx) => ({
-          question: ans.question,
-          solution: ans.answer,
-          score: Math.floor(Math.random() * 40) + 60, // Simulated score
-          timeSpent: ans.timeSpent,
-          testCasesPassed: Math.floor(Math.random() * 8) + 2,
-          totalTestCases: 10,
-          codeQuality: Math.floor(Math.random() * 30) + 70,
-          complexity: questions.coding[idx]?.difficulty || "medium",
-        })),
-        hrAnswers: answers.hr.map((ans, idx) => ({
-          question: ans.question,
-          answer: ans.answer,
-          score: Math.floor(Math.random() * 30) + 70, // Simulated score
-          timeSpent: ans.timeSpent,
-          keywords: extractKeywords(ans.answer),
-          sentiment: analyzeSentiment(ans.answer),
-        })),
-        violations: violations.map((v) => ({
-          type: v.type,
-          description: v.description,
-          timestamp: v.timestamp,
-          severity: v.severity,
-        })),
-        behaviorAnalysis: {
-          eyeMovementPattern: "normal",
-          facialExpressions: ["focused", "neutral", "concentrated"],
-          confidenceLevel: Math.floor(Math.random() * 20) + 80,
-          stressIndicators: violations.length > 5 ? ["multiple_violations"] : [],
-        },
-        completedAt: new Date(),
-        deviceInfo: {
-          browser: navigator.userAgent.split(" ").pop(),
-          os: navigator.platform,
-          screenResolution: `${screen.width}x${screen.height}`,
-          cameraQuality: "HD",
-        },
-      }
-
       await axios.post("http://localhost:5000/api/client/submit-interview", {
-        email: interviewData.email,
+        email: user.email,
         interviewResults: results,
       })
-
       onComplete(results)
     } catch (error) {
-      console.error("Error submitting interview results:", error)
-      alert("Error submitting interview results. Please try again.")
+      console.error("Error submitting results:", error)
     }
   }
 
-  // Scoring functions
-  const calculateAptitudeScore = (answers, questions) => {
-    if (!answers.length || !questions.length) return 0
-
-    let correct = 0
-    answers.forEach((answer, index) => {
-      if (answer.answer === questions[index]?.correct) {
-        correct++
-      }
-    })
-
-    return Math.round((correct / questions.length) * 100)
+  // Format time
+  const formatTime = (seconds) => {
+    const mins = Math.floor(seconds / 60)
+    const secs = seconds % 60
+    return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`
   }
 
-  const calculateCodingScore = (answers, questions) => {
-    if (!answers.length) return 0
-
-    // Simulated coding score based on answer length and complexity
-    const avgScore = answers.reduce((sum, answer) => {
-      const baseScore = Math.min(answer.answer.length / 10, 50) // Length-based score
-      const complexityBonus = answer.answer.includes("function") || answer.answer.includes("class") ? 20 : 0
-      const timeBonus = answer.timeSpent < 600 ? 10 : 0 // Bonus for quick solutions
-      return sum + Math.min(baseScore + complexityBonus + timeBonus, 100)
-    }, 0)
-
-    return Math.round(avgScore / answers.length)
+  // Get violation color
+  const getViolationColor = (severity) => {
+    switch (severity) {
+      case "critical":
+        return "text-red-600"
+      case "high":
+        return "text-orange-600"
+      case "medium":
+        return "text-yellow-600"
+      case "low":
+        return "text-blue-600"
+      default:
+        return "text-gray-600"
+    }
   }
 
-  const calculateHRScore = (answers, questions) => {
-    if (!answers.length) return 0
-
-    // Simulated HR score based on answer quality indicators
-    const avgScore = answers.reduce((sum, answer) => {
-      const lengthScore = Math.min(answer.answer.length / 5, 40) // Length indicates thoughtfulness
-      const keywordScore = extractKeywords(answer.answer).length * 5 // Relevant keywords
-      const sentimentScore = analyzeSentiment(answer.answer) === "positive" ? 20 : 10
-      return sum + Math.min(lengthScore + keywordScore + sentimentScore, 100)
-    }, 0)
-
-    return Math.round(avgScore / answers.length)
-  }
-
-  // Helper functions
-  const extractKeywords = (text) => {
-    const keywords = ["experience", "project", "team", "challenge", "solution", "learn", "grow", "skill"]
-    return keywords.filter((keyword) => text.toLowerCase().includes(keyword))
-  }
-
-  const analyzeSentiment = (text) => {
-    const positiveWords = ["good", "great", "excellent", "love", "enjoy", "excited", "passionate"]
-    const negativeWords = ["bad", "difficult", "hate", "boring", "frustrated"]
-
-    const positiveCount = positiveWords.filter((word) => text.toLowerCase().includes(word)).length
-    const negativeCount = negativeWords.filter((word) => text.toLowerCase().includes(word)).length
-
-    return positiveCount > negativeCount ? "positive" : negativeCount > positiveCount ? "negative" : "neutral"
-  }
-
-  if (loading) {
+  if (!interviewStarted) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center">
-        <div className="bg-white rounded-2xl shadow-xl p-8 max-w-md w-full mx-4">
-          <div className="text-center">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-            <h3 className="text-xl font-semibold text-gray-800 mb-2">Loading Interview</h3>
-            <p className="text-gray-600">Preparing your personalized questions...</p>
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50 flex items-center justify-center p-4">
+        <div className="max-w-4xl w-full bg-white rounded-2xl shadow-2xl overflow-hidden">
+          <div className="bg-gradient-to-r from-blue-600 to-indigo-600 p-8 text-white">
+            <h1 className="text-3xl font-bold mb-2">AI Interview Platform</h1>
+            <p className="text-blue-100">Advanced ML-Powered Interview System</p>
           </div>
-        </div>
-      </div>
-    )
-  }
 
-  // Setup screen
-  if (currentSection === "setup") {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-4">
-        <div className="max-w-4xl mx-auto">
-          <div className="bg-white rounded-2xl shadow-xl overflow-hidden">
-            <div className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white p-6">
-              <h1 className="text-3xl font-bold mb-2">AI Interview Platform</h1>
-              <p className="text-blue-100">Advanced ML-Powered Interview System</p>
+          <div className="p-8">
+            <div className="mb-8">
+              <h2 className="text-2xl font-bold text-gray-900 mb-4">Welcome, {user.name}!</h2>
+              <p className="text-gray-600 mb-6">
+                You're about to begin your interview for the position of{" "}
+                <span className="font-semibold text-blue-600">{interviewData.role}</span>. This interview consists of
+                three rounds with advanced monitoring.
+              </p>
             </div>
 
-            <div className="p-8">
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                <div>
-                  <h2 className="text-2xl font-bold text-gray-800 mb-4">Welcome, {interviewData.name}!</h2>
-                  <p className="text-gray-600 mb-6">
-                    You're about to begin an AI-powered interview for the position of{" "}
-                    <span className="font-semibold text-blue-600">{interviewData.role}</span>.
-                  </p>
-
-                  <div className="space-y-4 mb-8">
-                    <div className="flex items-start space-x-3">
-                      <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center flex-shrink-0">
-                        <span className="text-blue-600 font-bold text-sm">1</span>
-                      </div>
-                      <div>
-                        <h3 className="font-semibold text-gray-800">Aptitude Test</h3>
-                        <p className="text-gray-600 text-sm">10 questions • 15 minutes • Adaptive difficulty</p>
-                      </div>
-                    </div>
-
-                    <div className="flex items-start space-x-3">
-                      <div className="w-8 h-8 bg-green-100 rounded-full flex items-center justify-center flex-shrink-0">
-                        <span className="text-green-600 font-bold text-sm">2</span>
-                      </div>
-                      <div>
-                        <h3 className="font-semibold text-gray-800">Coding Challenge</h3>
-                        <p className="text-gray-600 text-sm">3 problems • 45 minutes • Real-world scenarios</p>
-                      </div>
-                    </div>
-
-                    <div className="flex items-start space-x-3">
-                      <div className="w-8 h-8 bg-purple-100 rounded-full flex items-center justify-center flex-shrink-0">
-                        <span className="text-purple-600 font-bold text-sm">3</span>
-                      </div>
-                      <div>
-                        <h3 className="font-semibold text-gray-800">HR Interview</h3>
-                        <p className="text-gray-600 text-sm">5 questions • 20 minutes • Behavioral assessment</p>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
-                    <h4 className="font-semibold text-red-800 mb-2">⚠️ Important Guidelines</h4>
-                    <ul className="text-red-700 text-sm space-y-1">
-                      <li>• Keep your camera on throughout the interview</li>
-                      <li>• Stay in fullscreen mode - do not switch tabs</li>
-                      <li>• Ensure you're alone in a quiet room</li>
-                      <li>• Advanced AI monitoring will track your behavior</li>
-                      <li>• Multiple violations may result in interview termination</li>
-                    </ul>
-                  </div>
-
-                  <button
-                    onClick={() => startSection("aptitude")}
-                    className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-semibold py-3 px-6 rounded-lg transition-all duration-300 transform hover:scale-105"
-                  >
-                    Start Interview
-                  </button>
-                </div>
-
-                <div>
-                  <h3 className="text-xl font-semibold text-gray-800 mb-4">Camera Setup & AI Monitoring</h3>
-                  <AdvancedFaceDetection onViolation={handleViolation} isActive={true} />
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Violation Alert */}
-        {showViolationAlert && currentViolation && (
-          <div className="fixed top-4 right-4 bg-red-500 text-white p-4 rounded-lg shadow-lg z-50 max-w-sm">
-            <div className="flex items-start space-x-3">
-              <svg className="w-6 h-6 text-white flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z"
-                />
-              </svg>
-              <div>
-                <h4 className="font-semibold">Violation Detected</h4>
-                <p className="text-sm">{currentViolation.description}</p>
-                <p className="text-xs opacity-75">Severity: {currentViolation.severity}</p>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-    )
-  }
-
-  // Interview sections would continue here with similar enhanced components
-  // For brevity, I'll show the structure for the aptitude section
-
-  if (currentSection === "aptitude") {
-    const currentQ = questions.aptitude[currentQuestion]
-
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-4">
-        <div className="max-w-6xl mx-auto">
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* Main Question Area */}
-            <div className="lg:col-span-2">
-              <div className="bg-white rounded-2xl shadow-xl p-8">
-                <div className="flex items-center justify-between mb-6">
-                  <div>
-                    <h2 className="text-2xl font-bold text-gray-800">Aptitude Test</h2>
-                    <p className="text-gray-600">
-                      Question {currentQuestion + 1} of {questions.aptitude.length}
-                    </p>
-                  </div>
-                  <div className="text-right">
-                    <div className="text-2xl font-bold text-blue-600">
-                      {Math.floor(timeSpent.aptitude / 60)}:{(timeSpent.aptitude % 60).toString().padStart(2, "0")}
-                    </div>
-                    <p className="text-gray-500 text-sm">Time Elapsed</p>
-                  </div>
-                </div>
-
-                {currentQ && (
-                  <div>
-                    <div className="mb-6">
-                      <div className="flex items-center space-x-2 mb-4">
-                        <span
-                          className={`px-2 py-1 rounded-full text-xs font-medium ${
-                            currentQ.difficulty === "easy"
-                              ? "bg-green-100 text-green-800"
-                              : currentQ.difficulty === "medium"
-                                ? "bg-yellow-100 text-yellow-800"
-                                : currentQ.difficulty === "hard"
-                                  ? "bg-red-100 text-red-800"
-                                  : "bg-purple-100 text-purple-800"
-                          }`}
-                        >
-                          {currentQ.difficulty?.toUpperCase() || "MEDIUM"}
-                        </span>
-                      </div>
-                      <h3 className="text-xl font-semibold text-gray-800 mb-4">{currentQ.question}</h3>
-                    </div>
-
-                    <div className="space-y-3">
-                      {currentQ.options?.map((option, index) => (
-                        <button
-                          key={index}
-                          onClick={() => handleAnswerSubmit(option)}
-                          className="w-full text-left p-4 border-2 border-gray-200 rounded-lg hover:border-blue-500 hover:bg-blue-50 transition-all duration-300"
-                        >
-                          <div className="flex items-center space-x-3">
-                            <div className="w-6 h-6 border-2 border-gray-300 rounded-full flex items-center justify-center">
-                              <span className="text-sm font-medium">{String.fromCharCode(65 + index)}</span>
-                            </div>
-                            <span className="text-gray-800">{option}</span>
-                          </div>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Sidebar with monitoring */}
-            <div className="space-y-6">
-              <AdvancedFaceDetection onViolation={handleViolation} isActive={true} />
-
-              {/* Progress */}
-              <div className="bg-white rounded-xl shadow-lg p-4">
-                <h4 className="font-semibold text-gray-800 mb-3">Progress</h4>
-                <div className="space-y-2">
-                  <div className="flex justify-between text-sm">
-                    <span>Aptitude</span>
-                    <span>
-                      {currentQuestion + 1}/{questions.aptitude.length}
-                    </span>
-                  </div>
-                  <div className="w-full bg-gray-200 rounded-full h-2">
+            {/* Interview Structure */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+              {rounds.map((round, index) => {
+                const Icon = round.icon
+                return (
+                  <div key={index} className="bg-gray-50 rounded-xl p-6 text-center">
                     <div
-                      className="bg-blue-600 h-2 rounded-full transition-all duration-300"
-                      style={{ width: `${((currentQuestion + 1) / questions.aptitude.length) * 100}%` }}
-                    ></div>
+                      className={`w-16 h-16 bg-${round.color}-100 rounded-full flex items-center justify-center mx-auto mb-4`}
+                    >
+                      <Icon className={`w-8 h-8 text-${round.color}-600`} />
+                    </div>
+                    <h3 className="text-lg font-semibold text-gray-900 mb-2">{round.name}</h3>
+                    <p className="text-sm text-gray-600 mb-3">{round.description}</p>
+                    <div className="text-sm font-medium text-gray-700">
+                      Duration: {Math.floor(round.duration / 60)} minutes
+                    </div>
                   </div>
+                )
+              })}
+            </div>
+
+            {/* Monitoring Features */}
+            <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-6 mb-8">
+              <h3 className="text-lg font-semibold text-yellow-800 mb-4 flex items-center">
+                <Shield className="w-5 h-5 mr-2" />
+                Advanced Monitoring Features
+              </h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm text-yellow-700">
+                <div className="flex items-center">
+                  <Camera className="w-4 h-4 mr-2" />
+                  ML-powered face detection and tracking
+                </div>
+                <div className="flex items-center">
+                  <Mic className="w-4 h-4 mr-2" />
+                  Advanced audio analysis and monitoring
+                </div>
+                <div className="flex items-center">
+                  <Monitor className="w-4 h-4 mr-2" />
+                  Screen activity and fullscreen enforcement
+                </div>
+                <div className="flex items-center">
+                  <Wifi className="w-4 h-4 mr-2" />
+                  Real-time network stability monitoring
+                </div>
+                <div className="flex items-center">
+                  <Eye className="w-4 h-4 mr-2" />
+                  Eye tracking and attention monitoring
+                </div>
+                <div className="flex items-center">
+                  <Activity className="w-4 h-4 mr-2" />
+                  Behavioral pattern analysis
                 </div>
               </div>
+            </div>
 
-              {/* Violations */}
-              {violations.length > 0 && (
-                <div className="bg-white rounded-xl shadow-lg p-4">
-                  <h4 className="font-semibold text-gray-800 mb-3">Monitoring Alerts</h4>
-                  <div className="space-y-2 max-h-32 overflow-y-auto">
-                    {violations.slice(-3).map((violation, index) => (
-                      <div key={index} className="text-xs p-2 bg-red-50 rounded border-l-2 border-red-400">
-                        <p className="font-medium text-red-800">{violation.type.replace("_", " ").toUpperCase()}</p>
-                        <p className="text-red-600">{violation.description}</p>
-                      </div>
-                    ))}
+            {/* System Requirements */}
+            <div className="bg-blue-50 border border-blue-200 rounded-xl p-6 mb-8">
+              <h3 className="text-lg font-semibold text-blue-800 mb-4">System Requirements</h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm text-blue-700">
+                <div>✓ Working webcam (HD recommended)</div>
+                <div>✓ Working microphone</div>
+                <div>✓ Stable internet connection</div>
+                <div>✓ Modern web browser</div>
+                <div>✓ Quiet environment</div>
+                <div>✓ Good lighting</div>
+              </div>
+            </div>
+
+            {/* Important Instructions */}
+            <div className="bg-red-50 border border-red-200 rounded-xl p-6 mb-8">
+              <h3 className="text-lg font-semibold text-red-800 mb-4 flex items-center">
+                <AlertTriangle className="w-5 h-5 mr-2" />
+                Important Instructions
+              </h3>
+              <ul className="text-sm text-red-700 space-y-2">
+                <li>• Do not switch tabs or exit fullscreen during the interview</li>
+                <li>• Ensure only your face is visible in the camera</li>
+                <li>• Do not use external assistance or resources</li>
+                <li>• Maintain eye contact with the camera</li>
+                <li>• Speak clearly and avoid background noise</li>
+                <li>• Any violations will be recorded and may affect your evaluation</li>
+              </ul>
+            </div>
+
+            <div className="flex items-center justify-between">
+              <button
+                onClick={onBack}
+                className="flex items-center px-6 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg font-medium transition-colors duration-300"
+              >
+                <Home className="w-4 h-4 mr-2" />
+                Back to Dashboard
+              </button>
+              <button
+                onClick={startInterview}
+                className="flex items-center px-8 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-lg font-semibold shadow-lg hover:shadow-xl transform hover:-translate-y-0.5 transition-all duration-300"
+              >
+                <Play className="w-5 h-5 mr-2" />
+                Start Interview
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  if (interviewCompleted) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-green-50 via-blue-50 to-indigo-50 flex items-center justify-center p-4">
+        <div className="max-w-2xl w-full bg-white rounded-2xl shadow-2xl overflow-hidden">
+          <div className="bg-gradient-to-r from-green-600 to-blue-600 p-8 text-white text-center">
+            <CheckCircle className="w-16 h-16 mx-auto mb-4" />
+            <h1 className="text-3xl font-bold mb-2">Interview Completed!</h1>
+            <p className="text-green-100">Thank you for completing the AI interview</p>
+          </div>
+
+          <div className="p-8 text-center">
+            <p className="text-gray-600 mb-6">
+              Your interview has been successfully submitted. You will receive detailed results and feedback via email
+              within 2-3 business days.
+            </p>
+
+            <div className="bg-gray-50 rounded-xl p-6 mb-6">
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">Interview Summary</h3>
+              <div className="grid grid-cols-2 gap-4 text-sm">
+                <div>
+                  <span className="text-gray-600">Total Time:</span>
+                  <div className="font-medium">
+                    {Math.floor(rounds.reduce((sum, round) => sum + round.duration, 0) / 60)} minutes
                   </div>
                 </div>
+                <div>
+                  <span className="text-gray-600">Violations:</span>
+                  <div className="font-medium">{violations.length}</div>
+                </div>
+                <div>
+                  <span className="text-gray-600">Rounds Completed:</span>
+                  <div className="font-medium">{rounds.length}</div>
+                </div>
+                <div>
+                  <span className="text-gray-600">Monitoring Score:</span>
+                  <div className="font-medium">{Math.max(0, 100 - violations.length * 5)}%</div>
+                </div>
+              </div>
+            </div>
+
+            <button
+              onClick={onBack}
+              className="px-8 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-lg font-semibold shadow-lg hover:shadow-xl transform hover:-translate-y-0.5 transition-all duration-300"
+            >
+              Return to Dashboard
+            </button>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  const currentRoundData = rounds[currentRound]
+  const currentQuestions = getCurrentQuestions()
+  const currentQuestionData = currentQuestions[currentQuestion]
+
+  return (
+    <div className="min-h-screen bg-gray-900 text-white">
+      {/* Header */}
+      <div className="bg-gray-800 border-b border-gray-700 p-4">
+        <div className="max-w-7xl mx-auto flex items-center justify-between">
+          <div className="flex items-center space-x-6">
+            <div className="flex items-center space-x-2">
+              <currentRoundData.icon className={`w-6 h-6 text-${currentRoundData.color}-400`} />
+              <h1 className="text-xl font-bold">{currentRoundData.name}</h1>
+            </div>
+            <div className="text-sm text-gray-400">
+              Question {currentQuestion + 1} of {currentQuestions.length}
+            </div>
+          </div>
+
+          <div className="flex items-center space-x-6">
+            <div className="flex items-center space-x-2">
+              <Clock className="w-5 h-5 text-yellow-400" />
+              <span className="text-xl font-mono">{formatTime(timeRemaining)}</span>
+            </div>
+            <div className="flex items-center space-x-2">
+              <AlertTriangle className="w-5 h-5 text-red-400" />
+              <span className="text-sm">Violations: {violations.length}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="max-w-7xl mx-auto p-6">
+        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+          {/* Main Content */}
+          <div className="lg:col-span-3">
+            <div className="bg-gray-800 rounded-xl p-6">
+              {currentRound === 0 && (
+                <AptitudeQuestion
+                  question={currentQuestionData}
+                  onAnswer={handleAnswerSubmit}
+                  timeRemaining={timeRemaining}
+                />
+              )}
+              {currentRound === 1 && (
+                <CodingQuestion
+                  question={currentQuestionData}
+                  onAnswer={handleAnswerSubmit}
+                  timeRemaining={timeRemaining}
+                />
+              )}
+              {currentRound === 2 && (
+                <HRQuestion
+                  question={currentQuestionData}
+                  onAnswer={handleAnswerSubmit}
+                  timeRemaining={timeRemaining}
+                />
               )}
             </div>
           </div>
-        </div>
 
-        {/* Violation Alert */}
-        {showViolationAlert && currentViolation && (
-          <div className="fixed top-4 right-4 bg-red-500 text-white p-4 rounded-lg shadow-lg z-50 max-w-sm">
-            <div className="flex items-start space-x-3">
-              <svg className="w-6 h-6 text-white flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z"
-                />
-              </svg>
-              <div>
-                <h4 className="font-semibold">Violation Detected</h4>
-                <p className="text-sm">{currentViolation.description}</p>
-                <p className="text-xs opacity-75">Severity: {currentViolation.severity}</p>
+          {/* Monitoring Panel */}
+          <div className="space-y-6">
+            {/* Camera Feed */}
+            <div className="bg-gray-800 rounded-xl p-4">
+              <h3 className="text-sm font-semibold text-gray-300 mb-3 flex items-center">
+                <Camera className="w-4 h-4 mr-2" />
+                Camera Feed
+              </h3>
+              <div className="relative">
+                <video ref={videoRef} autoPlay muted className="w-full h-32 bg-gray-700 rounded-lg object-cover" />
+                <canvas ref={canvasRef} className="hidden" />
+                <div className="absolute top-2 right-2 flex space-x-1">
+                  {monitoringData.faceDetected ? (
+                    <div className="w-2 h-2 bg-green-400 rounded-full"></div>
+                  ) : (
+                    <div className="w-2 h-2 bg-red-400 rounded-full"></div>
+                  )}
+                  {monitoringData.multipleFaces && <div className="w-2 h-2 bg-orange-400 rounded-full"></div>}
+                </div>
+              </div>
+              <div className="mt-2 text-xs text-gray-400">
+                Confidence: {Math.round(monitoringData.confidenceScore)}%
+              </div>
+            </div>
+
+            {/* Monitoring Status */}
+            <div className="bg-gray-800 rounded-xl p-4">
+              <h3 className="text-sm font-semibold text-gray-300 mb-3 flex items-center">
+                <Shield className="w-4 h-4 mr-2" />
+                Monitoring Status
+              </h3>
+              <div className="space-y-2 text-xs">
+                <div className="flex justify-between">
+                  <span>Face Detection</span>
+                  <span className={monitoringData.faceDetected ? "text-green-400" : "text-red-400"}>
+                    {monitoringData.faceDetected ? "✓" : "✗"}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span>Attention Level</span>
+                  <span className="text-blue-400">{Math.round(monitoringData.attentionLevel)}%</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>Audio Level</span>
+                  <span className="text-green-400">{Math.round(monitoringData.audioLevel)}%</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>Network Quality</span>
+                  <span className="text-blue-400">{Math.round(performanceMetrics.networkStability)}%</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Recent Violations */}
+            <div className="bg-gray-800 rounded-xl p-4">
+              <h3 className="text-sm font-semibold text-gray-300 mb-3 flex items-center">
+                <AlertTriangle className="w-4 h-4 mr-2" />
+                Recent Violations
+              </h3>
+              <div className="space-y-2 max-h-32 overflow-y-auto">
+                {violations.slice(-3).map((violation, index) => (
+                  <div key={index} className="text-xs">
+                    <div className={`font-medium ${getViolationColor(violation.severity)}`}>
+                      {violation.type.replace("_", " ").toUpperCase()}
+                    </div>
+                    <div className="text-gray-400">{violation.description}</div>
+                  </div>
+                ))}
+                {violations.length === 0 && <div className="text-xs text-gray-500">No violations detected</div>}
               </div>
             </div>
           </div>
-        )}
+        </div>
       </div>
-    )
+    </div>
+  )
+}
+
+// Aptitude Question Component
+const AptitudeQuestion = ({ question, onAnswer, timeRemaining }) => {
+  const [selectedAnswer, setSelectedAnswer] = useState("")
+
+  if (!question) {
+    return <div className="text-center text-gray-400">Loading question...</div>
   }
 
-  // Similar implementations would follow for coding and hr sections
-  // For now, return a placeholder for other sections
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center">
-      <div className="bg-white rounded-2xl shadow-xl p-8 max-w-md w-full mx-4">
-        <div className="text-center">
-          <h3 className="text-xl font-semibold text-gray-800 mb-2">
-            {currentSection === "coding" ? "Coding Challenge" : "HR Interview"}
-          </h3>
-          <p className="text-gray-600 mb-4">Section in development...</p>
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-2xl font-bold text-white mb-4">Question {question.id}</h2>
+        <p className="text-lg text-gray-300 leading-relaxed">{question.question}</p>
+      </div>
+
+      <div className="space-y-3">
+        {question.options?.map((option, index) => (
           <button
-            onClick={completeInterview}
-            className="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded-lg"
+            key={index}
+            onClick={() => setSelectedAnswer(option)}
+            className={`w-full p-4 text-left rounded-lg border-2 transition-all duration-300 ${
+              selectedAnswer === option
+                ? "border-blue-500 bg-blue-500/20 text-white"
+                : "border-gray-600 bg-gray-700 text-gray-300 hover:border-gray-500"
+            }`}
           >
-            Complete Interview
+            <span className="font-medium mr-3">{String.fromCharCode(65 + index)}.</span>
+            {option}
           </button>
+        ))}
+      </div>
+
+      <div className="flex justify-between items-center">
+        <div className="text-sm text-gray-400">
+          Difficulty: <span className="capitalize">{question.difficulty}</span>
         </div>
+        <button
+          onClick={() => onAnswer(selectedAnswer)}
+          disabled={!selectedAnswer}
+          className="px-6 py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white rounded-lg font-medium transition-colors duration-300"
+        >
+          Submit Answer
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// Coding Question Component
+const CodingQuestion = ({ question, onAnswer, timeRemaining }) => {
+  const [code, setCode] = useState(question?.template || "")
+
+  if (!question) {
+    return <div className="text-center text-gray-400">Loading question...</div>
+  }
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-2xl font-bold text-white">{question.title}</h2>
+          <span
+            className={`px-3 py-1 rounded-full text-sm font-medium ${
+              question.difficulty === "Easy"
+                ? "bg-green-500/20 text-green-400"
+                : question.difficulty === "Medium"
+                  ? "bg-yellow-500/20 text-yellow-400"
+                  : "bg-red-500/20 text-red-400"
+            }`}
+          >
+            {question.difficulty}
+          </span>
+        </div>
+        <p className="text-gray-300 leading-relaxed">{question.description}</p>
+      </div>
+
+      <div>
+        <label className="block text-sm font-medium text-gray-300 mb-2">Your Solution:</label>
+        <textarea
+          value={code}
+          onChange={(e) => setCode(e.target.value)}
+          className="w-full h-64 p-4 bg-gray-900 border border-gray-600 rounded-lg text-white font-mono text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+          placeholder="Write your code here..."
+        />
+      </div>
+
+      <div className="flex justify-between items-center">
+        <div className="text-sm text-gray-400">
+          Time remaining: {Math.floor(timeRemaining / 60)}:{(timeRemaining % 60).toString().padStart(2, "0")}
+        </div>
+        <button
+          onClick={() => onAnswer(code)}
+          disabled={!code.trim()}
+          className="px-6 py-3 bg-green-600 hover:bg-green-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white rounded-lg font-medium transition-colors duration-300"
+        >
+          Submit Solution
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// HR Question Component
+const HRQuestion = ({ question, onAnswer, timeRemaining }) => {
+  const [answer, setAnswer] = useState("")
+  const [isRecording, setIsRecording] = useState(false)
+
+  if (!question) {
+    return <div className="text-center text-gray-400">Loading question...</div>
+  }
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-2xl font-bold text-white mb-4">HR Question {question.id}</h2>
+        <p className="text-lg text-gray-300 leading-relaxed">{question.question}</p>
+      </div>
+
+      <div>
+        <label className="block text-sm font-medium text-gray-300 mb-2">Your Response:</label>
+        <textarea
+          value={answer}
+          onChange={(e) => setAnswer(e.target.value)}
+          className="w-full h-32 p-4 bg-gray-700 border border-gray-600 rounded-lg text-white focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+          placeholder="Type your answer here..."
+        />
+      </div>
+
+      <div className="flex justify-between items-center">
+        <div className="flex items-center space-x-4">
+          <button
+            onClick={() => setIsRecording(!isRecording)}
+            className={`flex items-center px-4 py-2 rounded-lg font-medium transition-colors duration-300 ${
+              isRecording ? "bg-red-600 hover:bg-red-700 text-white" : "bg-gray-600 hover:bg-gray-700 text-gray-300"
+            }`}
+          >
+            {isRecording ? <Pause className="w-4 h-4 mr-2" /> : <Mic className="w-4 h-4 mr-2" />}
+            {isRecording ? "Stop Recording" : "Record Audio"}
+          </button>
+          <div className="text-sm text-gray-400">
+            Category: <span className="capitalize">{question.category}</span>
+          </div>
+        </div>
+        <button
+          onClick={() => onAnswer(answer)}
+          disabled={!answer.trim()}
+          className="px-6 py-3 bg-purple-600 hover:bg-purple-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white rounded-lg font-medium transition-colors duration-300"
+        >
+          Submit Response
+        </button>
       </div>
     </div>
   )

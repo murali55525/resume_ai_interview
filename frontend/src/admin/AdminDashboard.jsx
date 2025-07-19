@@ -73,16 +73,6 @@ function AdminDashboard({ onLogout }) {
     }
   }
 
-  // Fetch detailed analytics
-  const fetchAnalytics = async (period = "30d") => {
-    try {
-      const response = await axios.get(`http://localhost:5000/api/admin/analytics?period=${period}`)
-      setAnalytics(response.data)
-    } catch (err) {
-      console.error("Analytics fetch error:", err)
-    }
-  }
-
   useEffect(() => {
     fetchApplicants()
   }, [filters])
@@ -1003,11 +993,11 @@ function AdminDashboard({ onLogout }) {
       {/* Resume Modal */}
       {showResumeModal && selectedApplicant && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-hidden">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden">
             <div className="flex items-center justify-between p-6 border-b border-gray-200">
               <div>
-                <h3 className="text-xl font-bold text-gray-800">Resume - {selectedApplicant.name}</h3>
-                <p className="text-gray-600">{selectedApplicant.resumeData?.fileName}</p>
+                <h3 className="text-xl font-bold text-gray-800">Complete Profile - {selectedApplicant.name}</h3>
+                <p className="text-gray-600">{selectedApplicant.email}</p>
               </div>
               <button
                 onClick={() => setShowResumeModal(false)}
@@ -1018,136 +1008,308 @@ function AdminDashboard({ onLogout }) {
                 </svg>
               </button>
             </div>
-            <div className="p-6">
-              <div className="space-y-4">
-                <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
-                  <div className="flex items-center space-x-3">
-                    <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
-                      <svg className="w-5 h-5 text-blue-600" fill="currentColor" viewBox="0 0 20 20">
-                        <path
-                          fillRule="evenodd"
-                          d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z"
-                          clipRule="evenodd"
-                        />
-                      </svg>
-                    </div>
-                    <div>
-                      <p className="font-medium text-gray-800">{selectedApplicant.resumeData?.fileName}</p>
-                      <p className="text-sm text-gray-500">Resume Document</p>
-                    </div>
-                  </div>
-                  <a
-                    href={selectedApplicant.resumeData?.downloadUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center space-x-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-colors duration-300"
-                  >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 2 0 01-2 2z"
-                      />
-                    </svg>
-                    <span>Download</span>
-                  </a>
-                </div>
-
-                {/* Candidate Details */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="space-y-3">
-                    <div>
-                      <label className="text-sm font-semibold text-gray-700">Email</label>
-                      <p className="text-gray-800">{selectedApplicant.email}</p>
-                    </div>
-                    <div>
-                      <label className="text-sm font-semibold text-gray-700">Phone</label>
-                      <p className="text-gray-800">{selectedApplicant.phone}</p>
-                    </div>
-                    <div>
-                      <label className="text-sm font-semibold text-gray-700">Institution</label>
-                      <p className="text-gray-800">{selectedApplicant.institution}</p>
-                    </div>
-                    <div>
-                      <label className="text-sm font-semibold text-gray-700">Education</label>
-                      <p className="text-gray-800">{selectedApplicant.education}</p>
-                    </div>
-                  </div>
-                  <div className="space-y-3">
-                    <div>
-                      <label className="text-sm font-semibold text-gray-700">Desired Role</label>
-                      <p className="text-gray-800">{selectedApplicant.role || "General Position"}</p>
-                    </div>
-                    {selectedApplicant.experience && (
-                      <div>
-                        <label className="text-sm font-semibold text-gray-700">Experience</label>
-                        <p className="text-gray-800">{selectedApplicant.experience}</p>
-                      </div>
-                    )}
-                    {selectedApplicant.linkedin && (
-                      <div>
-                        <label className="text-sm font-semibold text-gray-700">LinkedIn</label>
-                        <a
-                          href={selectedApplicant.linkedin}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-blue-600 hover:text-blue-800 underline"
-                        >
-                          View Profile
-                        </a>
-                      </div>
-                    )}
-                    {selectedApplicant.github && (
-                      <div>
-                        <label className="text-sm font-semibold text-gray-700">GitHub</label>
-                        <a
-                          href={selectedApplicant.github}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-blue-600 hover:text-blue-800 underline"
-                        >
-                          View Profile
-                        </a>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* Skills */}
-                {selectedApplicant.skills && selectedApplicant.skills.length > 0 && (
+            <div className="p-6 max-h-[calc(90vh-120px)] overflow-y-auto">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                {/* Personal Information */}
+                <div className="space-y-6">
                   <div>
-                    <label className="text-sm font-semibold text-gray-700 mb-2 block">Skills</label>
-                    <div className="flex flex-wrap gap-2">
-                      {selectedApplicant.skills.map((skill, index) => (
-                        <span
-                          key={index}
-                          className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-sm font-medium"
-                        >
-                          {skill}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Notes */}
-                {selectedApplicant.notes && selectedApplicant.notes.length > 0 && (
-                  <div>
-                    <label className="text-sm font-semibold text-gray-700 mb-2 block">Notes</label>
-                    <div className="space-y-2">
-                      {selectedApplicant.notes.map((note, index) => (
-                        <div key={index} className="p-3 bg-gray-50 rounded-lg">
-                          <p className="text-sm text-gray-800">{note.content}</p>
-                          <p className="text-xs text-gray-500 mt-1">
-                            By {note.author} on {new Date(note.timestamp).toLocaleString()}
-                          </p>
+                    <h4 className="text-lg font-semibold text-gray-900 mb-4">Personal Information</h4>
+                    <div className="space-y-3">
+                      <div>
+                        <label className="text-sm font-medium text-gray-700">Full Name</label>
+                        <p className="text-gray-900">{selectedApplicant.name}</p>
+                      </div>
+                      <div>
+                        <label className="text-sm font-medium text-gray-700">Email</label>
+                        <p className="text-gray-900">{selectedApplicant.email}</p>
+                      </div>
+                      <div>
+                        <label className="text-sm font-medium text-gray-700">Phone</label>
+                        <p className="text-gray-900">{selectedApplicant.phone}</p>
+                      </div>
+                      <div>
+                        <label className="text-sm font-medium text-gray-700">Institution</label>
+                        <p className="text-gray-900">{selectedApplicant.institution}</p>
+                      </div>
+                      {selectedApplicant.address && (
+                        <div>
+                          <label className="text-sm font-medium text-gray-700">Address</label>
+                          <p className="text-gray-900">{selectedApplicant.address}</p>
                         </div>
-                      ))}
+                      )}
                     </div>
                   </div>
-                )}
+
+                  {/* Professional Information */}
+                  <div>
+                    <h4 className="text-lg font-semibold text-gray-900 mb-4">Professional Information</h4>
+                    <div className="space-y-3">
+                      <div>
+                        <label className="text-sm font-medium text-gray-700">Education</label>
+                        <p className="text-gray-900">{selectedApplicant.education}</p>
+                      </div>
+                      <div>
+                        <label className="text-sm font-medium text-gray-700">Desired Role</label>
+                        <p className="text-gray-900">{selectedApplicant.role || "General Position"}</p>
+                      </div>
+                      {selectedApplicant.experience && (
+                        <div>
+                          <label className="text-sm font-medium text-gray-700">Experience</label>
+                          <p className="text-gray-900">{selectedApplicant.experience}</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Professional Links & Skills */}
+                <div className="space-y-6">
+                  <div>
+                    <h4 className="text-lg font-semibold text-gray-900 mb-4">Professional Links</h4>
+                    <div className="space-y-3">
+                      {selectedApplicant.linkedin && (
+                        <div>
+                          <label className="text-sm font-medium text-gray-700">LinkedIn</label>
+                          <a
+                            href={selectedApplicant.linkedin}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-blue-600 hover:text-blue-800 underline block"
+                          >
+                            View Profile
+                          </a>
+                        </div>
+                      )}
+                      {selectedApplicant.github && (
+                        <div>
+                          <label className="text-sm font-medium text-gray-700">GitHub</label>
+                          <a
+                            href={selectedApplicant.github}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-blue-600 hover:text-blue-800 underline block"
+                          >
+                            View Profile
+                          </a>
+                        </div>
+                      )}
+                      {selectedApplicant.portfolio && (
+                        <div>
+                          <label className="text-sm font-medium text-gray-700">Portfolio</label>
+                          <a
+                            href={selectedApplicant.portfolio}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-blue-600 hover:text-blue-800 underline block"
+                          >
+                            View Portfolio
+                          </a>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Skills */}
+                  {selectedApplicant.skills && selectedApplicant.skills.length > 0 && (
+                    <div>
+                      <h4 className="text-lg font-semibold text-gray-900 mb-4">Skills</h4>
+                      <div className="flex flex-wrap gap-2">
+                        {selectedApplicant.skills.map((skill, index) => (
+                          <span
+                            key={index}
+                            className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-sm font-medium"
+                          >
+                            {skill}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Resume Download */}
+                  {selectedApplicant.resumeData && (
+                    <div>
+                      <h4 className="text-lg font-semibold text-gray-900 mb-4">Resume</h4>
+                      <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
+                        <div className="flex items-center space-x-3">
+                          <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
+                            <svg className="w-5 h-5 text-blue-600" fill="currentColor" viewBox="0 0 20 20">
+                              <path
+                                fillRule="evenodd"
+                                d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z"
+                                clipRule="evenodd"
+                              />
+                            </svg>
+                          </div>
+                          <div>
+                            <p className="font-medium text-gray-800">{selectedApplicant.resumeData.fileName}</p>
+                            <p className="text-sm text-gray-500">Resume Document</p>
+                          </div>
+                        </div>
+                        <a
+                          href={selectedApplicant.resumeData.downloadUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center space-x-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-colors duration-300"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                            />
+                          </svg>
+                          <span>Download</span>
+                        </a>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Application Status */}
+                  <div>
+                    <h4 className="text-lg font-semibold text-gray-900 mb-4">Application Status</h4>
+                    <div className="space-y-3">
+                      <div>
+                        <label className="text-sm font-medium text-gray-700">Current Status</label>
+                        <div className="mt-1">
+                          <span
+                            className={`px-3 py-1 rounded-full text-sm font-semibold border ${getStatusColor(
+                              selectedApplicant.status,
+                            )}`}
+                          >
+                            {getStatusText(selectedApplicant.status)}
+                          </span>
+                        </div>
+                      </div>
+                      <div>
+                        <label className="text-sm font-medium text-gray-700">Priority</label>
+                        <div className="mt-1">
+                          <span
+                            className={`px-2 py-1 rounded-full text-sm font-medium ${getPriorityColor(
+                              selectedApplicant.priority,
+                            )}`}
+                          >
+                            {selectedApplicant.priority || "medium"}
+                          </span>
+                        </div>
+                      </div>
+                      <div>
+                        <label className="text-sm font-medium text-gray-700">Applied Date</label>
+                        <p className="text-gray-900">{new Date(selectedApplicant.createdAt).toLocaleDateString()}</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
               </div>
+
+              {/* Interview Results */}
+              {selectedApplicant.status === "interview_completed" && selectedApplicant.interviewResults && (
+                <div className="mt-8 pt-6 border-t border-gray-200">
+                  <h4 className="text-lg font-semibold text-gray-900 mb-4">Interview Results</h4>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                      <h5 className="font-medium text-gray-700 mb-3">Scores</h5>
+                      <div className="space-y-2">
+                        <div className="flex justify-between">
+                          <span>Aptitude:</span>
+                          <span className="font-medium">{selectedApplicant.interviewResults.aptitudeScore}%</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>Coding:</span>
+                          <span className="font-medium">{selectedApplicant.interviewResults.codingScore}%</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>HR:</span>
+                          <span className="font-medium">{selectedApplicant.interviewResults.hrScore}%</span>
+                        </div>
+                        <div className="flex justify-between border-t pt-2">
+                          <span className="font-semibold">Total:</span>
+                          <span className="font-bold text-lg">{selectedApplicant.interviewResults.totalScore}%</span>
+                        </div>
+                        {selectedApplicant.interviewResults.percentile && (
+                          <div className="flex justify-between">
+                            <span>Percentile:</span>
+                            <span className="font-medium text-blue-600">
+                              {selectedApplicant.interviewResults.percentile}%
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    <div>
+                      <h5 className="font-medium text-gray-700 mb-3">Monitoring</h5>
+                      <div className="space-y-2">
+                        <div className="flex justify-between">
+                          <span>Violations:</span>
+                          <span
+                            className={`font-medium ${
+                              selectedApplicant.interviewResults.violations?.length > 0
+                                ? "text-red-600"
+                                : "text-green-600"
+                            }`}
+                          >
+                            {selectedApplicant.interviewResults.violations?.length || 0}
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>Completed:</span>
+                          <span className="font-medium">
+                            {new Date(selectedApplicant.interviewResults.completedAt).toLocaleDateString()}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Notes */}
+              {selectedApplicant.notes && selectedApplicant.notes.length > 0 && (
+                <div className="mt-6 pt-6 border-t border-gray-200">
+                  <h4 className="text-lg font-semibold text-gray-900 mb-4">Notes</h4>
+                  <div className="space-y-2">
+                    {selectedApplicant.notes.map((note, index) => (
+                      <div key={index} className="p-3 bg-gray-50 rounded-lg">
+                        <p className="text-sm text-gray-800">{note.content}</p>
+                        <p className="text-xs text-gray-500 mt-1">
+                          By {note.author} on {new Date(note.timestamp).toLocaleString()}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+            <div className="px-6 py-4 border-t border-gray-200 flex justify-end space-x-3">
+              <button
+                onClick={() => setShowResumeModal(false)}
+                className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg font-medium transition-colors duration-300"
+              >
+                Close
+              </button>
+              {(selectedApplicant.status === "pending" || selectedApplicant.status === "under_review") && (
+                <>
+                  <button
+                    onClick={() => {
+                      setShowResumeModal(false)
+                      handleApprove(selectedApplicant._id, selectedApplicant.email, selectedApplicant.name)
+                    }}
+                    className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium transition-colors duration-300"
+                  >
+                    Approve Candidate
+                  </button>
+                  <button
+                    onClick={() => {
+                      setShowResumeModal(false)
+                      handleReject(selectedApplicant._id, selectedApplicant.email)
+                    }}
+                    className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg font-medium transition-colors duration-300"
+                  >
+                    Reject Candidate
+                  </button>
+                </>
+              )}
             </div>
           </div>
         </div>

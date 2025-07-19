@@ -240,14 +240,14 @@ const createTransporter = async () => {
   try {
     console.log("🔧 Setting up Gmail transporter...")
 
-    transporter = nodemailer.createTransporter({
+    transporter = nodemailer.createTransport({
       service: "gmail",
       host: "smtp.gmail.com",
       port: 587,
       secure: false,
       auth: {
         user: "m.muralikarthick123@gmail.com",
-        pass: "nrpo egfz guvo bncy",
+        pass: "xacb bqee eaai arkc",
       },
       tls: {
         rejectUnauthorized: false,
